@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dev AI Platform - 智能开发助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            width: 95%;
+            max-width: 1400px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* 左侧边栏 */
+        .sidebar {
+            width: 280px;
+            background: #f5f7fa;
+            border-right: 1px solid #e0e0e0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .sidebar h2 {
+            color: #667eea;
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+
+        .upload-section {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .upload-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: transform 0.2s;
+            margin-top: 10px;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .upload-btn:active {
+            transform: translateY(0);
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .batch-upload-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: transform 0.2s;
+            margin-top: 10px;
+        }
+
+        .batch-upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4);
+        }
+
+        .status-panel {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            flex: 1;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            font-size: 13px;
+        }
+
+        .status-label {
+            color: #666;
+        }
+
+        .status-value {
+            color: #667eea;
+            font-weight: bold;
+        }
+
+        /* 主聊天区域 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 20px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .chat-header h1 {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .chat-header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .message.ai .message-avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 15px 20px;
+            border-radius: 15px;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+
+        .message.ai .message-content {
+            background: white;
+            color: #333;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .input-area {
+            padding: 20px 30px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+            resize: vertical;
+            min-height: 60px;
+            max-height: 150px;
+            font-family: inherit;
+            line-height: 1.5;
+        }
+
+        .message-input:focus {
+            border-color: #667eea;
+        }
+
+        .send-btn {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.05);
+        }
+
+        .send-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .log-area {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            font-size: 12px;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            margin: 5px 0;
+            color: #666;
+        }
+
+        .log-entry.success {
+            color: #28a745;
+        }
+
+        .log-entry.error {
+            color: #dc3545;
+        }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #764ba2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 左侧边栏 -->
+        <div class="sidebar">
+            <h2>🛠️ 功能面板</h2>
+            
+            <!-- 单文件上传 -->
+            <div class="upload-section">
+                <h3>📄 上传PDF到知识库</h3>
+                <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                    上传单个PDF文件，自动解析并存入向量库
+                </p>
+                <input type="file" id="singleFileInput" class="file-input" accept=".pdf">
+                <button class="upload-btn" onclick="uploadSingleFile()">
+                    📤 选择并上传PDF
+                </button>
+                <div id="singleFileProgress" class="progress-bar" style="display: none;">
+                    <div class="progress-fill"></div>
+                </div>
+                <div id="singleFileLog" class="log-area" style="display: none;"></div>
+            </div>
+
+            <!-- 批量文件上传 -->
+            <div class="upload-section">
+                <h3>📁 批量OCR处理</h3>
+                <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                    选择文件夹，批量OCR识别图片PDF
+                </p>
+                <input type="file" id="folderInput" class="file-input" accept=".pdf" multiple webkitdirectory mozdirectory>
+                <button class="batch-upload-btn" onclick="uploadBatchFiles()">
+                    📂 选择文件夹批量处理
+                </button>
+                <div id="batchFileProgress" class="progress-bar" style="display: none;">
+                    <div class="progress-fill"></div>
+                </div>
+                <div id="batchFileLog" class="log-area" style="display: none;"></div>
+            </div>
+
+            <!-- 文件操作 -->
+            <div class="upload-section">
+                <h3>📁 文件操作</h3>
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                    <input type="text" id="filePathInput" placeholder="文件路径" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px;">
+                    <button class="upload-btn" onclick="readFile()" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">📖 读取文件</button>
+                    <button class="upload-btn" onclick="listDirectory()" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">📋 列出目录</button>
+                </div>
+            </div>
+
+            <!-- 项目生成 -->
+            <div class="upload-section">
+                <h3>🏗️ 项目生成</h3>
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                    <input type="text" id="projectPathInput" placeholder="项目路径" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px;">
+                    <input type="text" id="projectNameInput" placeholder="项目名称" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px;">
+                    <input type="text" id="packageNameInput" placeholder="包名（如 com.example.demo）" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px;">
+                    <button class="upload-btn" onclick="generateSpringBootProject()" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">🚀 生成 Spring Boot 项目</button>
+                </div>
+            </div>
+
+            <!-- CRUD 模块生成 -->
+            <div class="upload-section">
+                <h3>⚙️ CRUD 模块</h3>
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                    <input type="text" id="crudProjectPathInput" placeholder="项目路径" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px;">
+                    <input type="text" id="crudPackageNameInput" placeholder="包名" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px;">
+                    <input type="text" id="entityNameInput" placeholder="实体名（如 User）" style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px;">
+                    <button class="upload-btn" onclick="generateCrudModule()" style="background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);">⚡ 生成 CRUD 代码</button>
+                </div>
+            </div>
+
+            <!-- 状态面板 -->
+            <div class="status-panel">
+                <h3>📊 系统状态</h3>
+                <div class="status-item">
+                    <span class="status-label">待蒸馏对话:</span>
+                    <span class="status-value" id="pendingCount">0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">永久记忆:</span>
+                    <span class="status-value" id="memoryCount">0</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">对话轮数:</span>
+                    <span class="status-value" id="chatCount">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主聊天区域 -->
+        <div class="main-content">
+            <div class="chat-header">
+                <h1>🤖 Dev AI Platform</h1>
+                <p>智能开发助手 - 支持代码查询、需求分析、SQL优化、错误排查</p>
+            </div>
+
+            <div class="chat-messages" id="chatMessages">
+                <!-- 欢迎消息 -->
+                <div class="message ai">
+                    <div class="message-avatar">🤖</div>
+                    <div>
+                        <div class="message-content">
+                            你好！我是Dev AI智能开发助手 👋<br><br>
+                            我可以帮你：<br>
+                            • 查找代码示例和技术文档<br>
+                            • 生成单元测试和接口文档<br>
+                            • 优化SQL查询性能<br>
+                            • 分析错误日志并提供解决方案<br>
+                            • 自动生成CRUD代码<br><br>
+                            有什么可以帮你的吗？😊
+                        </div>
+                        <div class="message-time" id="welcomeTime"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <textarea
+                    class="message-input"
+                    id="messageInput"
+                    placeholder="输入你的问题或任务描述（支持多行输入）..."
+                    onkeydown="handleKeyDown(event)"
+                ></textarea>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                    发送 ➤
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API基础地址（使用相对路径，避免CORS问题）
+        const API_BASE = '/api/dev-ai';
+        
+        // 对话历史
+        let chatHistory = [];
+        let chatCounter = 0;
+
+        // 初始化
+        window.onload = function() {
+            updateWelcomeTime();
+            loadStatus();
+            setInterval(loadStatus, 10000); // 每10秒刷新状态
+        };
+
+        // 更新欢迎时间
+        function updateWelcomeTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            document.getElementById('welcomeTime').textContent = timeStr;
+        }
+
+        // 加载状态
+        async function loadStatus() {
+            try {
+                // 获取待蒸馏数量
+                const pendingResp = await fetch(`${API_BASE}/memory/pending-count`);
+                if (pendingResp.ok) {
+                    const result = await pendingResp.json();
+                    if (result.code === 200) {
+                        document.getElementById('pendingCount').textContent = result.data || 0;
+                    }
+                }
+
+                // 获取记忆统计
+                const statsResp = await fetch(`${API_BASE}/memory/stats`);
+                if (statsResp.ok) {
+                    const result = await statsResp.json();
+                    if (result.code === 200) {
+                        document.getElementById('memoryCount').textContent = result.data.totalMemories || 0;
+                    }
+                }
+            } catch (error) {
+                console.error('加载状态失败:', error);
+            }
+        }
+
+        // 处理键盘事件（支持换行，Ctrl+Enter发送）
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && event.ctrlKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        // 添加消息到聊天区
+        function addMessage(role, content) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            const avatar = role === 'ai' ? '🤖' : '👤';
+            const time = new Date().toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            messageDiv.innerHTML = `
+                <div class="message-avatar">${avatar}</div>
+                <div>
+                    <div class="message-content">${content}</div>
+                    <div class="message-time">${time}</div>
+                </div>
+            `;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // 记录历史
+            chatHistory.push({ role, content, time });
+            chatCounter++;
+            document.getElementById('chatCount').textContent = chatCounter;
+        }
+
+        // 发送消息
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const question = input.value.trim();
+
+            if (!question) {
+                return;
+            }
+
+            // 禁用输入
+            input.disabled = true;
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span class="loading"></span>';
+
+            // 显示用户消息
+            addMessage('user', question.replace(/\n/g, '<br>'));
+            input.value = '';
+
+            try {
+                // 构建上下文（最近5轮对话）
+                const context = buildContext();
+
+                // 【更新】使用新的问答接口（更轻量，适合纯对话场景）
+                const response = await fetch(`${API_BASE}/chat/ask`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `question=${encodeURIComponent(question)}&contextHistory=${encodeURIComponent(context)}`
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                // 判断Result包装类的返回状态
+                if (result.code !== 200) {
+                    addMessage('ai', `❌ 请求失败: ${result.message}`);
+                } else {
+                    // 显示AI回复（result.data 是真正的返回数据）
+                    addMessage('ai', formatResponse(result.data));
+                }
+
+            } catch (error) {
+                console.error('发送消息失败:', error);
+                addMessage('ai', `❌ 请求失败: ${error.message}`);
+            } finally {
+                // 恢复输入
+                input.disabled = false;
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '发送 ➤';
+                input.focus();
+            }
+        }
+
+        // 构建对话上下文
+        function buildContext() {
+            if (chatHistory.length === 0) {
+                return '';
+            }
+
+            // 取最近5轮对话（10条消息）
+            const recentHistory = chatHistory.slice(-10);
+            const contextParts = [];
+
+            recentHistory.forEach(msg => {
+                const role = msg.role === 'user' ? '用户' : '助手';
+                // 移除HTML标签
+                const cleanContent = msg.content.replace(/<[^>]*>/g, '');
+                contextParts.push(`${role}：${cleanContent}`);
+            });
+
+            return contextParts.join('\n');
+        }
+
+        // 格式化响应（简单处理Markdown）
+        function formatResponse(text) {
+            // 代码块
+            text = text.replace(/```([\s\S]*?)```/g, '<pre style="background:#f5f5f5;padding:10px;border-radius:5px;overflow-x:auto;"><code>$1</code></pre>');
+            
+            // 行内代码
+            text = text.replace(/`([^`]+)`/g, '<code style="background:#f5f5f5;padding:2px 5px;border-radius:3px;">$1</code>');
+            
+            // 粗体
+            text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            
+            // 换行
+            text = text.replace(/\n/g, '<br>');
+            
+            return text;
+        }
+
+        // 上传单个文件
+        async function uploadSingleFile() {
+            const fileInput = document.getElementById('singleFileInput');
+            const progress = document.getElementById('singleFileProgress');
+            const log = document.getElementById('singleFileLog');
+            
+            fileInput.click();
+            
+            fileInput.onchange = async function() {
+                if (!fileInput.files.length) return;
+                
+                const file = fileInput.files[0];
+                progress.style.display = 'block';
+                log.style.display = 'block';
+                log.innerHTML = '';
+                
+                addLog(log, `开始上传: ${file.name}`, 'info');
+                
+                try {
+                    // 创建FormData对象
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    addLog(log, '正在上传到服务器...', 'info');
+                    progress.querySelector('.progress-fill').style.width = '30%';
+                    
+                    // 调用后端接口
+                    const response = await fetch(`${API_BASE}/lib/upload-file`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    progress.querySelector('.progress-fill').style.width = '60%';
+                    addLog(log, '正在解析PDF并入库...', 'info');
+                    
+                    const result = await response.json();
+
+                    progress.querySelector('.progress-fill').style.width = '100%';
+
+                    // 适配Result包装类格式
+                    if (result.code === 200 && result.data && result.data.success) {
+                        addLog(log, `✅ ${result.data.message}`, 'success');
+                        addLog(log, `文件大小: ${(result.data.fileSize / 1024).toFixed(2)} KB`, 'info');
+                        addMessage('ai', `✅ PDF上传成功！<br><br>文件名: ${result.data.fileName}<br>大小: ${(result.data.fileSize / 1024).toFixed(2)} KB<br><br>已自动解析并存入向量库，可以开始检索了！`);
+                    } else {
+                        const errorMsg = result.code !== 200 ? result.message : (result.data ? result.data.message : '上传失败');
+                        addLog(log, `❌ ${errorMsg}`, 'error');
+                        addMessage('ai', `❌ 上传失败: ${errorMsg}`);
+                    }
+                    
+                } catch (error) {
+                    console.error('上传失败:', error);
+                    addLog(log, `❌ 上传失败: ${error.message}`, 'error');
+                    addMessage('ai', `❌ 上传失败: ${error.message}`);
+                }
+            };
+        }
+
+        // 批量上传文件
+        async function uploadBatchFiles() {
+            const folderInput = document.getElementById('folderInput');
+            const progress = document.getElementById('batchFileProgress');
+            const log = document.getElementById('batchFileLog');
+            
+            folderInput.click();
+            
+            folderInput.onchange = async function() {
+                if (!folderInput.files.length) return;
+                
+                const files = Array.from(folderInput.files);
+                progress.style.display = 'block';
+                log.style.display = 'block';
+                log.innerHTML = '';
+                
+                addLog(log, `检测到 ${files.length} 个PDF文件`, 'info');
+                
+                // 提取文件夹路径（简化处理）
+                const firstFile = files[0];
+                const folderPath = './docs'; // 默认文件夹
+                
+                addLog(log, `开始批量OCR处理...`, 'info');
+                
+                try {
+                    const response = await fetch(`${API_BASE}/ocr/process-folder`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `folderPath=${encodeURIComponent(folderPath)}`
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const results = await response.json();
+                    
+                    addLog(log, `✅ 处理完成: ${results.length} 个文件`, 'success');
+                    
+                    // 显示详细结果
+                    results.forEach((result, index) => {
+                        addLog(log, `[${index + 1}] ${result.fileName}: ${result.status}`, 
+                            result.success ? 'success' : 'error');
+                    });
+                    
+                    progress.querySelector('.progress-fill').style.width = '100%';
+                    
+                } catch (error) {
+                    console.error('批量处理失败:', error);
+                    addLog(log, `❌ 处理失败: ${error.message}`, 'error');
+                }
+            };
+        }
+
+        // 添加日志
+        function addLog(logElement, message, type) {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logElement.appendChild(entry);
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        // ==================== 文件操作功能 ====================
+
+        // 读取文件
+        async function readFile() {
+            const filePath = document.getElementById('filePathInput').value.trim();
+            if (!filePath) {
+                addMessage('ai', '❌ 请输入文件路径');
+                return;
+            }
+
+            addMessage('user', `📖 读取文件: ${filePath}`);
+            
+            try {
+                const response = await fetch(`${API_BASE}/file/read`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `filePath=${encodeURIComponent(filePath)}`
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (result.code === 200) {
+                    addMessage('ai', `✅ 文件内容：<br><pre style="background:#f5f5f5;padding:10px;border-radius:5px;overflow-x:auto;max-height:400px;">${result.data}</pre>`);
+                } else {
+                    addMessage('ai', `❌ 读取失败: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('读取文件失败:', error);
+                addMessage('ai', `❌ 读取失败: ${error.message}`);
+            }
+        }
+
+        // 列出目录
+        async function listDirectory() {
+            const dirPath = document.getElementById('filePathInput').value.trim();
+            if (!dirPath) {
+                addMessage('ai', '❌ 请输入目录路径');
+                return;
+            }
+
+            addMessage('user', `📋 列出目录: ${dirPath}`);
+            
+            try {
+                const response = await fetch(`${API_BASE}/file/list-directory`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `dirPath=${encodeURIComponent(dirPath)}`
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (result.code === 200) {
+                    addMessage('ai', `✅ 目录内容：<br><pre style="background:#f5f5f5;padding:10px;border-radius:5px;">${result.data}</pre>`);
+                } else {
+                    addMessage('ai', `❌ 列出失败: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('列出目录失败:', error);
+                addMessage('ai', `❌ 列出失败: ${error.message}`);
+            }
+        }
+
+        // ==================== 项目生成功能 ====================
+
+        // 生成 Spring Boot 项目
+        async function generateSpringBootProject() {
+            const projectPath = document.getElementById('projectPathInput').value.trim();
+            const projectName = document.getElementById('projectNameInput').value.trim();
+            const packageName = document.getElementById('packageNameInput').value.trim();
+
+            if (!projectPath || !projectName || !packageName) {
+                addMessage('ai', '❌ 请填写完整的项目信息（路径、名称、包名）');
+                return;
+            }
+
+            addMessage('user', `🚀 生成 Spring Boot 项目<br>路径: ${projectPath}<br>名称: ${projectName}<br>包名: ${packageName}`);
+            
+            try {
+                const response = await fetch(`${API_BASE}/project/generate-springboot`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `projectPath=${encodeURIComponent(projectPath)}&projectName=${encodeURIComponent(projectName)}&packageName=${encodeURIComponent(packageName)}`
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (result.code === 200) {
+                    addMessage('ai', `✅ ${result.data}`);
+                } else {
+                    addMessage('ai', `❌ 生成失败: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('生成项目失败:', error);
+                addMessage('ai', `❌ 生成失败: ${error.message}`);
+            }
+        }
+
+        // 生成 CRUD 模块
+        async function generateCrudModule() {
+            const projectPath = document.getElementById('crudProjectPathInput').value.trim();
+            const packageName = document.getElementById('crudPackageNameInput').value.trim();
+            const entityName = document.getElementById('entityNameInput').value.trim();
+
+            if (!projectPath || !packageName || !entityName) {
+                addMessage('ai', '❌ 请填写完整的信息（项目路径、包名、实体名）');
+                return;
+            }
+
+            addMessage('user', `⚡ 生成 CRUD 模块<br>项目: ${projectPath}<br>包名: ${packageName}<br>实体: ${entityName}`);
+            
+            try {
+                const response = await fetch(`${API_BASE}/project/generate-crud-module`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `projectPath=${encodeURIComponent(projectPath)}&packageName=${encodeURIComponent(packageName)}&entityName=${encodeURIComponent(entityName)}`
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (result.code === 200) {
+                    addMessage('ai', `✅ ${result.data}`);
+                } else {
+                    addMessage('ai', `❌ 生成失败: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('生成CRUD模块失败:', error);
+                addMessage('ai', `❌ 生成失败: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

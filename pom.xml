@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.16</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+    <groupId>com.devai</groupId>
+    <artifactId>dev-ai-platform</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>dev-ai-platform</name>
+    <description>dev-ai-platform</description>
+    <url/>
+    <licenses>
+        <license/>
+    </licenses>
+    <developers>
+        <developer/>
+    </developers>
+    <scm>
+        <connection/>
+        <developerConnection/>
+        <tag/>
+        <url/>
+    </scm>
+    <properties>
+        <java.version>17</java.version>
+    </properties>
+    <dependencies>
+        <!-- Spring Web 接口服务核心 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- 定时任务：知识库自动同步文档/代码 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-quartz</artifactId>
+        </dependency>
+
+        <!-- 开发辅助工具 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- 单元测试 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- 【修改】DeepSeek/OpenAI 云端大模型 SDK -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+            <version>0.36.2</version>
+        </dependency>
+
+        <!-- Ollama Java SDK 用于本地 Embedding 模型 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-ollama</artifactId>
+            <version>0.36.2</version>
+        </dependency>
+
+        <!-- Chroma 本地文件向量库,无需额外数据库服务 -->
+        <!--<dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-chroma</artifactId>
+            <version>0.36.2</version>
+        </dependency>-->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>0.36.2</version>
+        </dependency>
+
+        <!-- PDF工艺/需求文档解析 -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>2.0.32</version>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-document-parser-apache-pdfbox</artifactId>
+            <version>0.36.2</version>
+        </dependency>
+
+        <!-- OCR 图片文字识别（支持扫描版PDF、图片PDF） -->
+        <dependency>
+            <groupId>net.sourceforge.tess4j</groupId>
+            <artifactId>tess4j</artifactId>
+            <version>5.10.0</version>
+        </dependency>
+        <!-- Elasticsearch 向量存储 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-elasticsearch</artifactId>
+            <version>0.36.2</version>
+        </dependency>
+
+        <!-- JSON工具，处理模型返回结构化内容 -->
+        <dependency>
+            <groupId>com.alibaba.fastjson2</groupId>
+            <artifactId>fastjson2</artifactId>
+            <version>2.0.32</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>default-testCompile</id>
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
