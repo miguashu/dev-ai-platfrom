@@ -23,7 +23,24 @@ Dev AI Platform 是一个面向开发者的 AI 辅助平台，通过自然语言
 
 ## 🏗️ 系统架构
 
-mermaid graph TD A["用户 (前端/API)"] --> B["DevAiController"] B --> C["IntentAnalyzerService"] C --> D["TaskDispatcherService"] D --> E["DevAgentService"] E --> F["LangChain4j AiServices"] F --> G["FallbackChatLanguageModel"] G --> H["DeepSeek (云端)"] G --> I["Ollama (本地)"] E --> J["@Tool 工具集"] J --> K["DevRagService"] J --> L["PersistentMemoryService"] J --> M["LocalFileOperationService"] J --> N["ScriptExecutorService"] J --> O["IdeaErrorAnalyzerService"] J --> P["ProjectStructureGenerator"] K --> Q["VectorStoreService"] Q --> R["InMemory / Elasticsearch"]
+mermaid graph TD A["用户 (前端/API)"]
+--> B["DevAiController"] B 
+--> C["IntentAnalyzerService"] C 
+--> D["TaskDispatcherService"] D 
+--> E["DevAgentService"] E 
+--> F["LangChain4j AiServices"] F
+--> G["FallbackChatLanguageModel"] G
+--> H["DeepSeek (云端)"] G 
+--> I["Ollama (本地)"] E 
+--> J["@Tool 工具集"] J 
+--> K["DevRagService"] J 
+--> L["PersistentMemoryService"] J
+--> M["LocalFileOperationService"] J
+--> N["ScriptExecutorService"] J 
+--> O["IdeaErrorAnalyzerService"] J 
+--> P["ProjectStructureGenerator"] K 
+--> Q["VectorStoreService"] Q 
+--> R["InMemory / Elasticsearch"]
 ## 🛠️ 技术栈
 
 | 组件 | 技术 | 版本 |
@@ -41,7 +58,48 @@ mermaid graph TD A["用户 (前端/API)"] --> B["DevAiController"] B --> C["Inte
 
 ## 📂 项目结构
 
-dev-ai-platform/ ├── src/main/java/com/devai/devaiplatform/ │ ├── common/ │ │ └── Result.java # 统一响应封装 │ ├── config/ │ │ ├── AiConfig.java # AI 模型配置（DeepSeek + Ollama + 降级） │ │ ├── FallbackChatLanguageModel.java # 云端/本地自动降级包装器 │ │ └── WebConfig.java # Web 跨域配置 │ ├── controller/ │ │ └── DevAiController.java # REST API 控制器 │ ├── service/ │ │ ├── DevAgentService.java # 核心 Agent（工具定义 + AiServices） │ │ ├── IntentAnalyzerService.java # 意图分析（AI 智能体模式） │ │ ├── TaskDispatcherService.java # 任务路由分发 │ │ ├── TaskAnalysisResult.java # 意图分析结果模型 │ │ ├── TaskIntent.java # 意图类型枚举（40+种意图） │ │ ├── DevRagService.java # RAG 知识检索服务 │ │ ├── VectorStoreService.java # 向量存储管理（内存/ES 双模式） │ │ ├── ElasticsearchVectorStoreService.java # ES 向量存储实现 │ │ ├── PersistentMemoryService.java # 永久记忆（持久化 + 检索 + 归档） │ │ ├── MemoryDistillationScheduler.java # 定时批量蒸馏调度器 │ │ ├── OcrService.java # OCR 图片文字识别 │ │ ├── LocalFileOperationService.java # 本地文件读写操作 │ │ ├── ProjectStructureGenerator.java # Spring Boot 项目结构生成 │ │ ├── ScriptExecutorService.java # 本地脚本执行引擎 │ │ ├── IdeaErrorAnalyzerService.java # IDEA 编译/运行时错误分析 │ │ ├── AISummaryService.java # AI 摘要生成 │ │ └── PromptTemplate.java # Prompt 模板集合 │ └── DevAiPlatformApplication.java # 启动类 ├── scripts/ # AI 可执行的本地脚本 │ ├── file_list.bat # 列出目录 │ ├── file_read.bat # 读取文件 │ ├── file_create.bat # 创建目录 │ ├── file_copy.bat # 复制文件 │ ├── file_search.bat # 搜索文件 │ └── file_tree.bat # 目录树 ├── agent_memory/ # 记忆持久化存储 │ ├── persistent_memory.json # 永久记忆库 │ └── pending_conversations.json # 待蒸馏对话队列 └── application.properties # 应用配置
+dev-ai-platform/
+├── src/                                  # 业务源代码根目录
+│   └── main/
+│       └── java/com/devai/devaiplatform/ # Java业务代码
+│           ├── common/                   # 通用公共模块
+│           │   └── Result.java           # 全局统一接口响应封装类
+│           ├── config/                   # 全局配置类
+│           │   ├── AiConfig.java         # AI模型总配置（DeepSeek云端 + Ollama本地 + 自动降级策略）
+│           │   ├── FallbackChatLanguageModel.java # 云端/本地大模型自动降级包装器
+│           │   └── WebConfig.java         # Web全局配置（跨域、拦截器、消息转换器）
+│           ├── controller/               # REST接口控制层
+│           │   └── DevAiController.java  # 项目统一API入口控制器
+│           ├── service/                  # 核心业务服务层（AI智能体全能力）
+│           │   ├── DevAgentService.java          # 核心智能Agent：工具函数定义 + AiServices整合
+│           │   ├── IntentAnalyzerService.java    # 用户意图分析模块（标准AI Agent识别模式）
+│           │   ├── TaskDispatcherService.java    # 任务路由分发调度器
+│           │   ├── TaskAnalysisResult.java       # 意图分析结果数据模型
+│           │   ├── TaskIntent.java               # 任务意图枚举（覆盖40+业务意图分类）
+│           │   ├── DevRagService.java            # RAG知识库检索核心服务
+│           │   ├── VectorStoreService.java       # 向量存储顶层管理（内存向量库 / ES向量库双适配）
+│           │   ├── ElasticsearchVectorStoreService.java # ElasticSearch向量存储实现类
+│           │   ├── PersistentMemoryService.java  # 会话永久记忆服务：持久化存储+检索+归档
+│           │   ├── MemoryDistillationScheduler.java # 定时批量记忆蒸馏调度任务
+│           │   ├── OcrService.java               # OCR图片文字识别服务
+│           │   ├── LocalFileOperationService.java # 本地文件读写增删改操作工具
+│           │   ├── ProjectStructureGenerator.java # Spring Boot项目脚手架结构生成器
+│           │   ├── ScriptExecutorService.java    # 本地脚本安全执行引擎
+│           │   ├── IdeaErrorAnalyzerService.java # IDEA编译/运行报错智能分析服务
+│           │   ├── AISummaryService.java         # 文本AI摘要生成服务
+│           │   └── PromptTemplate.java           # 全局Prompt提示词模板合集
+│           └── DevAiPlatformApplication.java     # SpringBoot项目启动入口类
+├── scripts/                              # Agent可自主调用的本地批处理脚本库
+│   ├── file_list.bat        # 列出指定目录全部文件
+│   ├── file_read.bat        # 读取本地文件内容
+│   ├── file_create.bat      # 创建文件夹/空白文件
+│   ├── file_copy.bat        # 文件复制迁移
+│   ├── file_search.bat      # 全局关键词文件检索
+│   └── file_tree.bat        # 生成目录树形结构
+├── agent_memory/                          # AI智能体持久化记忆存储目录
+│   ├── persistent_memory.json             # 长期永久记忆知识库
+│   └── pending_conversations.json         # 待蒸馏压缩的临时对话队列
+└── application.properties                 # 项目全局配置文件（模型密钥、向量库、服务端口等）
 ## 🚀 快速开始
 
 ### 环境要求
