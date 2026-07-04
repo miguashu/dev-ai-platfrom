@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent 可视化管理面板 - Dev AI Platform</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+        .header {
+            background: rgba(0,0,0,0.3);
+            padding: 20px 40px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 { font-size: 24px; color: #7c83ff; }
+        .header .nav a {
+            color: #a0a0a0;
+            text-decoration: none;
+            margin-left: 20px;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+        .header .nav a:hover { color: #7c83ff; }
+        .header .nav a.active { color: #7c83ff; border-bottom: 2px solid #7c83ff; padding-bottom: 4px; }
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            padding: 15px 40px;
+            background: rgba(0,0,0,0.2);
+        }
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        .status-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.green { background: #4caf50; box-shadow: 0 0 8px #4caf50; }
+        .status-dot.red { background: #f44336; box-shadow: 0 0 8px #f44336; }
+        .status-dot.gray { background: #666; box-shadow: 0 0 8px #666; }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 40px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        .card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(10px);
+        }
+        .card.full-width { grid-column: 1 / -1; }
+        .card h2 {
+            font-size: 18px;
+            color: #7c83ff;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .card h2 .badge {
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: normal;
+        }
+        .badge.enabled { background: rgba(76,175,80,0.2); color: #4caf50; }
+        .badge.disabled { background: rgba(244,67,54,0.2); color: #f44336; }
+        .badge.manual { background: rgba(255,152,0,0.2); color: #ff9800; }
+        .badge.auto { background: rgba(76,175,80,0.2); color: #4caf50; }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 13px;
+        }
+        .info-row .label { color: #888; }
+        .info-row .value { color: #e0e0e0; font-weight: 500; }
+
+        .sensor-card, .tool-card, .strategy-card, .step-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 10px;
+        }
+        .sensor-card h4, .tool-card h4, .strategy-card h4 {
+            font-size: 14px;
+            color: #b0b8ff;
+            margin-bottom: 8px;
+        }
+        .sensor-card .config-grid, .tool-card .config-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 12px;
+            font-size: 12px;
+        }
+        .sensor-card .ckey, .tool-card .ckey { color: #888; }
+        .sensor-card .cval, .tool-card .cval { color: #ccc; word-break: break-all; }
+
+        .threshold-bar {
+            height: 6px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            margin: 6px 0;
+            position: relative;
+        }
+        .threshold-bar .fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s;
+        }
+        .threshold-bar .fill.warning { background: linear-gradient(90deg, #ff9800, #f44336); }
+        .threshold-bar .fill.critical { background: #f44336; }
+        .threshold-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #888;
+        }
+
+        .strategy-card .trigger {
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            background: rgba(0,0,0,0.3);
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: #ff9800;
+            display: inline-block;
+            margin: 4px 0;
+        }
+        .strategy-card .rollback {
+            font-size: 12px;
+            color: #888;
+            font-style: italic;
+            margin-top: 6px;
+        }
+
+        .step-list {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .step-list li {
+            background: rgba(124,131,255,0.15);
+            color: #b0b8ff;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+        }
+
+        .auth-box {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 8px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 12px;
+            color: #4caf50;
+            word-break: break-all;
+            margin-top: 8px;
+        }
+
+        .loading-text { color: #888; text-align: center; padding: 40px; }
+        .error-text { color: #f44336; text-align: center; padding: 40px; }
+
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Agent 可视化管理面板</h1>
+        <div class="nav">
+            <a href="/index.html">💬 智能对话</a>
+            <a href="/agent-dashboard.html" class="active">📊 Agent管理</a>
+        </div>
+    </div>
+
+    <div class="status-bar" id="statusBar">
+        <div class="status-item"><span class="status-dot gray" id="dotAgent"></span> Agent状态: <span id="txtAgent">加载中...</span></div>
+        <div class="status-item"><span class="status-dot gray" id="dotHeal"></span> 自愈: <span id="txtHeal">-</span></div>
+        <div class="status-item"><span class="status-dot gray" id="dotUpgrade"></span> 升级: <span id="txtUpgrade">-</span></div>
+    </div>
+
+    <div class="container" id="mainContent">
+        <div class="loading-text">⏳ 正在加载 Agent 配置...</div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/dev-ai';
+
+        async function loadConfig() {
+            try {
+                const resp = await fetch(`${API_BASE}/agent/config`);
+                const result = await resp.json();
+                if (result.code !== 200 || !result.data) {
+                    document.getElementById('mainContent').innerHTML = '<div class="error-text">❌ 加载配置失败</div>';
+                    return;
+                }
+                const config = result.data;
+                renderDashboard(config);
+                updateStatusBar(config);
+            } catch (err) {
+                document.getElementById('mainContent').innerHTML = '<div class="error-text">❌ 加载配置出错: ' + err.message + '</div>';
+            }
+        }
+
+        function updateStatusBar(config) {
+            const meta = config.agent_metadata || {};
+            const heal = config.self_healing_mechanism || {};
+            const upgrade = config.self_upgrade_mechanism || {};
+
+            document.getElementById('txtAgent').textContent = meta.agent_name + ' v' + meta.agent_version;
+            document.getElementById('dotAgent').className = 'status-dot green';
+
+            document.getElementById('txtHeal').textContent = heal.enabled ? '已启用' : '已禁用';
+            document.getElementById('dotHeal').className = 'status-dot ' + (heal.enabled ? 'green' : 'gray');
+
+            document.getElementById('txtUpgrade').textContent = upgrade.enabled ? '已启用' : '已禁用';
+            document.getElementById('dotUpgrade').className = 'status-dot ' + (upgrade.enabled ? 'green' : 'gray');
+        }
+
+        function renderDashboard(config) {
+            const meta = config.agent_metadata || {};
+            const core = config.core_capabilities || {};
+            const heal = config.self_healing_mechanism || {};
+            const upgrade = config.self_upgrade_mechanism || {};
+            const comm = config.communication_protocol || {};
+
+            let html = '';
+
+            // Agent 元信息
+            html += `<div class="card full-width">
+                <h2>📋 Agent 元信息</h2>
+                <div class="info-row"><span class="label">名称</span><span class="value">${esc(meta.agent_name)}</span></div>
+                <div class="info-row"><span class="label">版本</span><span class="value">v${esc(meta.agent_version)}</span></div>
+                <div class="info-row"><span class="label">描述</span><span class="value">${esc(meta.description)}</span></div>
+                <div class="info-row"><span class="label">创建时间</span><span class="value">${esc(meta.created_timestamp)}</span></div>
+            </div>`;
+
+            // 感知层
+            const perception = core.perception || {};
+            html += `<div class="card">
+                <h2>👁️ 感知层 (Perception)</h2>
+                <div class="info-row"><span class="label">描述</span><span class="value">${esc(perception.description)}</span></div>
+                <div class="info-row"><span class="label">输入类型</span><span class="value">${(perception.input_types||[]).join(', ')}</span></div>
+                <h3 style="font-size:14px;color:#888;margin-top:14px;margin-bottom:10px;">传感器列表</h3>`;
+            (perception.sensors || []).forEach(s => {
+                html += `<div class="sensor-card">
+                    <h4>🔹 ${esc(s.sensor_id)} <span style="color:#666;font-weight:normal;">(${esc(s.type)})</span></h4>
+                    <div class="config-grid">`;
+                if (s.config) {
+                    Object.entries(s.config).forEach(([k, v]) => {
+                        html += `<span class="ckey">${esc(k)}</span><span class="cval">${esc(String(v))}</span>`;
+                    });
+                }
+                html += `</div></div>`;
+            });
+            html += `</div>`;
+
+            // 认知层
+            const cognition = core.cognition || {};
+            const planning = cognition.planning_engine || {};
+            const kb = cognition.knowledge_base || {};
+            html += `<div class="card">
+                <h2>🧠 认知层 (Cognition)</h2>
+                <div class="info-row"><span class="label">描述</span><span class="value">${esc(cognition.description)}</span></div>
+                <h3 style="font-size:14px;color:#888;margin-top:14px;">规划引擎</h3>
+                <div class="info-row"><span class="label">类型</span><span class="value">${esc(planning.type)}</span></div>`;
+            if (planning.config) {
+                Object.entries(planning.config).forEach(([k, v]) => {
+                    html += `<div class="info-row"><span class="label">${esc(k)}</span><span class="value">${esc(String(v))}</span></div>`;
+                });
+            }
+            html += `<h3 style="font-size:14px;color:#888;margin-top:14px;">知识库</h3>
+                <div class="info-row"><span class="label">类型</span><span class="value">${esc(kb.type)}</span></div>
+                <div class="info-row"><span class="label">连接地址</span><span class="value">${esc(kb.connection_string)}</span></div>`;
+            if (kb.config) {
+                Object.entries(kb.config).forEach(([k, v]) => {
+                    html += `<div class="info-row"><span class="label">${esc(k)}</span><span class="value">${esc(String(v))}</span></div>`;
+                });
+            }
+            html += `</div>`;
+
+            // 执行层
+            const action = core.action || {};
+            html += `<div class="card">
+                <h2>⚡ 执行层 (Action)</h2>
+                <div class="info-row"><span class="label">描述</span><span class="value">${esc(action.description)}</span></div>
+                <div class="info-row"><span class="label">工具数量</span><span class="value">${(action.action_tools||[]).length} 个</span></div>
+                <h3 style="font-size:14px;color:#888;margin-top:14px;margin-bottom:10px;">工具列表</h3>`;
+            (action.action_tools || []).forEach(t => {
+                html += `<div class="tool-card">
+                    <h4>🔧 ${esc(t.tool_name)}</h4>
+                    <div class="config-grid">`;
+                if (t.parameters) {
+                    Object.entries(t.parameters).forEach(([k, v]) => {
+                        html += `<span class="ckey">${esc(k)}</span><span class="cval">${esc(String(v))}</span>`;
+                    });
+                }
+                html += `</div></div>`;
+            });
+            html += `</div>`;
+
+            // 自愈机制
+            const healthCheck = heal.health_check || {};
+            const thresholds = healthCheck.thresholds || {};
+            const diagnosis = heal.diagnosis || {};
+            html += `<div class="card full-width">
+                <h2>🩺 自愈机制 (Self-Healing) <span class="badge ${heal.enabled?'enabled':'disabled'}">${heal.enabled?'已启用':'已禁用'}</span></h2>
+                <h3 style="font-size:14px;color:#888;margin-top:10px;">健康检查 (每 ${healthCheck.frequency_seconds}s)</h3>
+                <div class="info-row"><span class="label">监控指标</span><span class="value">${(healthCheck.metrics||[]).join(', ')}</span></div>
+
+                <h3 style="font-size:14px;color:#888;margin-top:16px;">健康阈值</h3>`;
+
+            const thresholdDefs = [
+                { key: 'response_time_ms', label: '响应时间 (ms)' },
+                { key: 'error_rate', label: '错误率' },
+                { key: 'memory_usage_percent', label: '内存使用率 (%)' },
+                { key: 'cpu_usage_percent', label: 'CPU使用率 (%)' }
+            ];
+            thresholdDefs.forEach(td => {
+                const t = thresholds[td.key] || {};
+                const warnPct = td.key.includes('percent') ? t.warning : Math.min(100, t.warning / (td.key === 'response_time_ms' ? 10000 : 1) * 100);
+                const critPct = td.key.includes('percent') ? t.critical : Math.min(100, t.critical / (td.key === 'response_time_ms' ? 10000 : 1) * 100);
+                html += `<div style="margin-bottom:10px;">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;">
+                        <span>${td.label}</span><span style="color:#888;">预警: ${t.warning} | 临界: ${t.critical}</span>
+                    </div>
+                    <div class="threshold-bar">
+                        <div class="fill warning" style="width:${Math.max(0,Math.min(100,warnPct))}%"></div>
+                    </div>
+                </div>`;
+            });
+
+            html += `<h3 style="font-size:14px;color:#888;margin-top:16px;">故障诊断步骤</h3>`;
+            (diagnosis.diagnosis_steps || []).forEach(s => {
+                html += `<div class="step-card" style="padding:10px;">
+                    <span style="color:#b0b8ff;">步骤 ${s.step_id}:</span> ${esc(s.description)}
+                    <span style="color:#666;font-size:11px;margin-left:8px;">[${esc(s.action)}]</span>
+                </div>`;
+            });
+
+            html += `<h3 style="font-size:14px;color:#888;margin-top:16px;">修复策略 (${(heal.remediation_strategies||[]).length}项)</h3>`;
+            (heal.remediation_strategies || []).forEach(r => {
+                const act = r.action || {};
+                html += `<div class="strategy-card">
+                    <h4>🛠️ ${esc(r.strategy_id)}</h4>
+                    <div style="font-size:12px;color:#ccc;">${esc(r.description)}</div>
+                    <div class="trigger">触发条件: ${esc(r.trigger_condition)}</div>
+                    <div style="font-size:12px;color:#888;margin-top:4px;">
+                        动作: ${esc(act.type)} ${act.command ? '→ ' + esc(act.command) : ''} ${act.function_name ? '→ ' + esc(act.function_name) : ''}
+                    </div>
+                    <div class="rollback">📌 兜底: ${esc(r.rollback_plan)}</div>
+                </div>`;
+            });
+            html += `</div>`;
+
+            // 自升级机制
+            const policy = upgrade.upgrade_policy || {};
+            const source = upgrade.source || {};
+            const upProcess = upgrade.upgrade_process || {};
+            html += `<div class="card full-width">
+                <h2>🔄 自升级机制 (Self-Upgrade) <span class="badge ${upgrade.enabled?'enabled':'disabled'}">${upgrade.enabled?'已启用':'已禁用'}</span></h2>
+                <div class="info-row"><span class="label">升级策略</span><span class="value"><span class="badge ${policy.type==='manual'?'manual':'auto'}">${esc(policy.type)}</span></span></div>
+                <div class="info-row"><span class="label">需人工审批</span><span class="value">${policy.approval_required ? '✅ 是' : '❌ 否'}</span></div>
+                <div class="info-row"><span class="label">Git仓库</span><span class="value">${esc(source.url)}</span></div>
+                <div class="info-row"><span class="label">分支</span><span class="value">${esc(source.branch)}</span></div>
+
+                <h3 style="font-size:14px;color:#888;margin-top:16px;">升级触发器</h3>`;
+            (upgrade.upgrade_triggers || []).forEach(t => {
+                html += `<div class="strategy-card">
+                    <h4>⏰ ${esc(t.trigger_id)}</h4>
+                    <div style="font-size:12px;color:#ccc;">${esc(t.description)}</div>
+                    ${t.frequency_seconds ? `<div style="font-size:12px;color:#888;">频率: ${t.frequency_seconds}s (${Math.round(t.frequency_seconds/3600)}h)</div>` : ''}
+                    <div style="font-size:12px;color:#888;">动作: ${esc(t.action)}</div>
+                </div>`;
+            });
+
+            html += `<h3 style="font-size:14px;color:#888;margin-top:16px;">升级流程 (${(upProcess.steps||[]).length}步)</h3>
+                <ul class="step-list">`;
+            (upProcess.steps || []).forEach(s => {
+                html += `<li>${s.step}. ${esc(s.description)}</li>`;
+            });
+            html += `</ul>
+                <div class="info-row"><span class="label">失败自动回滚</span><span class="value">${upProcess.rollback_on_failure ? '✅ 是' : '❌ 否'}</span></div>
+            </div>`;
+
+            // 通信协议
+            const auth = comm.authentication || {};
+            html += `<div class="card">
+                <h2>📡 通信协议</h2>
+                <div class="info-row"><span class="label">API端点</span><span class="value">${esc(comm.api_endpoint)}</span></div>
+                <div class="info-row"><span class="label">消息格式</span><span class="value">${esc(comm.message_format)}</span></div>
+                <div class="info-row"><span class="label">认证方式</span><span class="value">${esc(auth.type)}</span></div>
+                ${auth.credentials ? `<div class="auth-box">${JSON.stringify(auth.credentials, null, 2)}</div>` : ''}
+            </div>`;
+
+            document.getElementById('mainContent').innerHTML = html;
+        }
+
+        function esc(str) {
+            if (str == null) return '-';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        window.onload = loadConfig;
+    </script>
+</body>
+</html>

@@ -1,17 +1,29 @@
 package com.devai.devaiplatform.controller;
 
 import com.devai.devaiplatform.common.Result;
+import com.devai.devaiplatform.config.agent.AgentConfig;
+import com.devai.devaiplatform.config.agent.AgentConfigService;
 import com.devai.devaiplatform.service.*;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -26,6 +38,8 @@ public class DevAiController {
     private final IntentAnalyzerService intentAnalyzerService;  // 【新增】意图分析服务
     private final TaskDispatcherService taskDispatcherService;  // 【新增】任务分发服务
     private final IdeaErrorAnalyzerService ideaErrorAnalyzerService;  // 【新增】IDEA错误分析服务
+    private final ChatHistoryService chatHistoryService;  // 【新增】聊天历史服务
+    private final AgentConfigService agentConfigService;  // 【新增】Agent配置服务
 
     // 【新增】文件上传安全配置
     @Value("${file.upload.max-size:52428800}") // 默认50MB
@@ -46,6 +60,12 @@ public class DevAiController {
     // 危险文件名模式（路径遍历、系统文件等）
     private static final Pattern DANGEROUS_PATTERN = Pattern.compile(".*(\\.\\.|/|\\\\|%|\\$|\0).*");
 
+    /** 文件名时间戳格式 */
+    private static final DateTimeFormatter TS_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+
+    /** 文件存储目录 */
+    private static final String UPLOAD_TEMP_DIR = "./uploads/temp";
+
 
     public DevAiController(DevRagService ragService,
                            DevAgentService agentService,
@@ -53,7 +73,9 @@ public class DevAiController {
                            MemoryDistillationScheduler distillationScheduler,
                            IntentAnalyzerService intentAnalyzerService,
                            TaskDispatcherService taskDispatcherService,
-                           IdeaErrorAnalyzerService ideaErrorAnalyzerService) {
+                           IdeaErrorAnalyzerService ideaErrorAnalyzerService,
+                           ChatHistoryService chatHistoryService,
+                           AgentConfigService agentConfigService) {
         this.ragService = ragService;
         this.agentService = agentService;
         this.ocrService = ocrService;  // 【新增】初始化
@@ -62,6 +84,8 @@ public class DevAiController {
         this.intentAnalyzerService = intentAnalyzerService;  // 【新增】初始化
         this.taskDispatcherService = taskDispatcherService;  // 【新增】初始化
         this.ideaErrorAnalyzerService = ideaErrorAnalyzerService;  // 【新增】初始化
+        this.chatHistoryService = chatHistoryService;  // 【新增】初始化
+        this.agentConfigService = agentConfigService;  // 【新增】初始化
     }
 
     // ==================== 智能路由分发 ====================
@@ -375,7 +399,11 @@ public class DevAiController {
      */
     @PostMapping("/agent/context-run")
     public Result<String> runTaskWithContext(@RequestParam String taskContent, @RequestParam String context) {
-        return Result.success(agentService.runTaskWithContext(taskContent, context));
+        String prompt = "历史上下文：\n" + context + "\n\n当前任务：" + taskContent;
+        // 1. AI分析意图（理解、拆分、提取）
+        TaskAnalysisResult analysis = intentAnalyzerService.analyze(prompt);
+
+        return Result.success(agentService.runTaskWithContext(analysis));
     }
 
     /**
@@ -384,12 +412,16 @@ public class DevAiController {
      *
      * @param question 当前问题
      * @param contextHistory 历史对话上下文，格式："用户: xxx\nAI: yyy\n用户: aaa\nAI: bbb"
+     * @param enableRag 是否启用RAG检索（默认false）
+     * @param enableWebSearch 是否启用联网搜索（默认false）
      * @return AI回答
      */
     @PostMapping("/chat/ask")
     public Result<String> askWithContext(@RequestParam String question,
-                                         @RequestParam(required = false) String contextHistory) {
-        return Result.success(agentService.askWithContext(question, contextHistory));
+                                         @RequestParam(required = false) String contextHistory,
+                                         @RequestParam(required = false, defaultValue = "false") boolean enableRag,
+                                         @RequestParam(required = false, defaultValue = "false") boolean enableWebSearch) {
+        return Result.success(agentService.askWithContext(question, contextHistory, enableRag, enableWebSearch));
     }
 
     /* 8. SQL性能优化分析
@@ -629,6 +661,122 @@ public class DevAiController {
     }
 
     /**
+     * 22b. OCR批量处理上传的PDF文件（前端选择文件夹后直接上传文件）
+     * 接收多文件上传 → 保存到临时目录 → OCR处理 → 清理
+     * @param files 上传的PDF文件列表
+     * @return OCR处理结果列表
+     */
+    @PostMapping("/ocr/process-files")
+    public Result<List<OcrService.OcrResult>> batchOcrProcessFiles(@RequestParam("files") List<MultipartFile> files) {
+        System.out.println("\n[OCR批量上传] 收到 " + files.size() + " 个文件");
+
+        if (files.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+
+        // 创建临时目录（用于OCR处理）
+        Path tempDir = null;
+        // 文件名映射：原始安全名 → 唯一文件名（带时间戳，向量库与磁盘一致）
+        Map<String, String> fileNameMapping = new LinkedHashMap<>();
+        try {
+            tempDir = Files.createTempDirectory("ocr_batch_");
+            System.out.println("[OCR批量上传] 临时目录: " + tempDir);
+
+            // 确保 uploads/temp/ 目录存在
+            Path uploadDir = Paths.get(UPLOAD_TEMP_DIR);
+            if (!Files.exists(uploadDir)) {
+                Files.createDirectories(uploadDir);
+            }
+            // 生成批次时间戳（同一批次所有文件共享，确保一致性）
+            String batchTs = LocalDateTime.now().format(TS_FORMATTER);
+
+            // 保存所有上传的文件到临时目录 + 同时保存到 uploads/temp/
+            int savedCount = 0;
+            for (MultipartFile file : files) {
+                String originalFilename = file.getOriginalFilename();
+                if (originalFilename == null || originalFilename.isBlank()) {
+                    continue;
+                }
+                // 只处理PDF文件
+                String lower = originalFilename.toLowerCase();
+                if (!lower.endsWith(".pdf")) {
+                    System.out.println("[OCR批量上传] 跳过非PDF文件: " + originalFilename);
+                    continue;
+                }
+
+                // 安全文件名处理
+                String safeName = sanitizeFilename(originalFilename);
+                // 给文件名追加时间戳
+                String uniqueName = appendTimestamp(safeName, batchTs);
+
+                // 保存到 OCR 临时目录（用安全名，OCR处理用）
+                Path tempTarget = tempDir.resolve(safeName);
+                file.transferTo(tempTarget.toFile());
+
+                // 同时保存到 uploads/temp/（用唯一名，供后续预览下载）
+                Path uploadTarget = uploadDir.resolve(uniqueName);
+                Files.copy(tempTarget, uploadTarget);
+
+                fileNameMapping.put(safeName, uniqueName);
+                savedCount++;
+                System.out.println("[OCR批量上传] 已保存: " + safeName + " → 源文件: " + uniqueName);
+            }
+
+            if (savedCount == 0) {
+                System.out.println("[OCR批量上传] 没有有效的PDF文件");
+                return Result.success(Collections.emptyList());
+            }
+
+            System.out.println("[OCR批量上传] 共保存 " + savedCount + " 个PDF（源文件已同步到 uploads/temp/），开始OCR处理...");
+
+            // 调用现有的批量处理逻辑
+            List<OcrService.OcrResult> results = ocrService.batchProcessFolder(tempDir.toString());
+
+            // 【关键】将OCR结果写入向量库（传入文件名映射，确保向量库 file_name 与磁盘一致）
+            int ingested = ragService.ingestOcrResults(results, fileNameMapping);
+            System.out.println("[OCR批量上传] 向量库入库: " + ingested + "/" + results.size() + " 个文档");
+
+            return Result.success(results);
+
+        } catch (IOException e) {
+            System.err.println("[OCR批量上传] 处理失败: " + e.getMessage());
+            e.printStackTrace();
+            return Result.error("OCR批量处理失败: " + e.getMessage());
+        } finally {
+            // 清理临时目录
+            if (tempDir != null) {
+                try {
+                    File[] files2 = tempDir.toFile().listFiles();
+                    if (files2 != null) {
+                        for (File f : files2) {
+                            f.delete();
+                        }
+                    }
+                    Files.deleteIfExists(tempDir);
+                    System.out.println("[OCR批量上传] 临时目录已清理");
+                } catch (IOException e) {
+                    System.err.println("[OCR批量上传] 清理临时目录失败: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * 给文件名追加时间戳
+     * 如 "简历.pdf" + "20260704153022" → "简历_20260704153022.pdf"
+     */
+    private String appendTimestamp(String fileName, String timestamp) {
+        String baseName = fileName;
+        String extension = "";
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            baseName = fileName.substring(0, dotIndex);
+            extension = fileName.substring(dotIndex);
+        }
+        return baseName + "_" + timestamp + extension;
+    }
+
+    /**
      * 23. OCR识别单个图片文件
      * @param imagePath 图片路径
      * @return 识别的文本
@@ -636,6 +784,128 @@ public class DevAiController {
     @GetMapping("/ocr/recognize-image")
     public Result<String> recognizeImage(@RequestParam String imagePath) {
         return Result.success(ocrService.recognizeTextFromImageFile(imagePath));
+    }
+
+    // ==================== 文件预览与下载 ====================
+
+    /**
+     * 26. 文件预览/下载（支持PDF等文件）
+     * 优先查找 uploads/temp/，其次查找 templates/ 目录
+     * @param name 文件名（URL编码），如 教育部学历证书电子注册备案表_李文昊-2.pdf
+     */
+    @GetMapping("/file/preview")
+    public void filePreview(@RequestParam String name, HttpServletResponse response) {
+        try {
+            // URL解码
+            String decodedName = URLDecoder.decode(name, StandardCharsets.UTF_8);
+            // 安全校验：防路径遍历
+            if (decodedName.contains("..") || decodedName.contains("/") || decodedName.contains("\\")) {
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, "非法文件名");
+                return;
+            }
+
+            // 多路径查找文件
+            Path filePath = null;
+            String[] searchDirs = {
+                "./uploads/temp",
+                "./templates",
+                "./src/main/resources/templates"
+            };
+            for (String dir : searchDirs) {
+                Path candidate = Paths.get(dir, decodedName);
+                if (Files.exists(candidate)) {
+                    filePath = candidate;
+                    break;
+                }
+            }
+
+            if (filePath == null) {
+                response.sendError(HttpServletResponse.SC_NOT_FOUND, "文件不存在: " + decodedName);
+                return;
+            }
+
+            // 设置Content-Type
+            String contentType = Files.probeContentType(filePath);
+            if (contentType == null) {
+                String lower = decodedName.toLowerCase();
+                if (lower.endsWith(".pdf")) contentType = "application/pdf";
+                else if (lower.endsWith(".png")) contentType = "image/png";
+                else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) contentType = "image/jpeg";
+                else contentType = "application/octet-stream";
+            }
+            response.setContentType(contentType);
+
+            // inline预览（浏览器内打开），不做附件下载
+            String encodedFilename = URLEncoder.encode(decodedName, StandardCharsets.UTF_8).replace("+", "%20");
+            response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                    "inline; filename*=UTF-8''" + encodedFilename);
+            response.setContentLengthLong(Files.size(filePath));
+
+            // 流式输出
+            try (FileInputStream fis = new FileInputStream(filePath.toFile());
+                 OutputStream os = response.getOutputStream()) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = fis.read(buffer)) != -1) {
+                    os.write(buffer, 0, bytesRead);
+                }
+                os.flush();
+            }
+        } catch (Exception e) {
+            try {
+                response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "文件预览失败: " + e.getMessage());
+            } catch (IOException ex) {
+                // ignore
+            }
+        }
+    }
+
+    // ==================== 聊天历史会话管理 ====================
+
+    /**
+     * 获取所有历史会话列表（摘要，按时间倒序）
+     */
+    @GetMapping("/history/list")
+    public Result<List<ChatHistoryService.ChatSession>> listHistorySessions() {
+        return Result.success(chatHistoryService.listSessions());
+    }
+
+    /**
+     * 获取单个历史会话的完整内容（含消息列表）
+     */
+    @GetMapping("/history/get")
+    public Result<ChatHistoryService.ChatSession> getHistorySession(@RequestParam String sessionId) {
+        ChatHistoryService.ChatSession session = chatHistoryService.getSession(sessionId);
+        if (session == null) {
+            return Result.notFound("会话不存在");
+        }
+        return Result.success(session);
+    }
+
+    /**
+     * 保存/更新聊天会话
+     */
+    @PostMapping("/history/save")
+    public Result<ChatHistoryService.ChatSession> saveHistorySession(@RequestBody ChatHistoryService.ChatSession session) {
+        return Result.success(chatHistoryService.saveSession(session));
+    }
+
+    /**
+     * 删除单个历史会话
+     */
+    @DeleteMapping("/history/delete")
+    public Result<String> deleteHistorySession(@RequestParam String sessionId) {
+        boolean deleted = chatHistoryService.deleteSession(sessionId);
+        return deleted ? Result.success("已删除") : Result.notFound("会话不存在");
+    }
+
+    /**
+     * 清空所有历史会话
+     */
+    @DeleteMapping("/history/clear")
+    public Result<String> clearAllHistory() {
+        int count = chatHistoryService.clearAllSessions();
+        return Result.success("已清空 " + count + " 个会话");
     }
 
     /**
@@ -699,6 +969,70 @@ public class DevAiController {
         public void transferTo(File dest) throws IOException, IllegalStateException {
             originalFile.transferTo(dest);
         }
+    }
+
+    // ==================== Agent配置管理面板API ====================
+
+    /**
+     * 获取Agent完整配置（用于前端管理面板展示）
+     */
+    @GetMapping("/agent/config")
+    public Result<AgentConfig> getAgentConfig() {
+        return Result.success(agentConfigService.getConfig());
+    }
+
+    /**
+     * 获取Agent配置摘要（自愈状态、升级策略等关键信息）
+     */
+    @GetMapping("/agent/config/summary")
+    public Result<Map<String, Object>> getAgentConfigSummary() {
+        AgentConfig config = agentConfigService.getConfig();
+        Map<String, Object> summary = new LinkedHashMap<>();
+
+        if (config.getAgentMetadata() != null) {
+            summary.put("agentName", config.getAgentMetadata().getAgentName());
+            summary.put("agentVersion", config.getAgentMetadata().getAgentVersion());
+            summary.put("description", config.getAgentMetadata().getDescription());
+        }
+
+        if (config.getSelfHealingMechanism() != null) {
+            summary.put("selfHealingEnabled", config.getSelfHealingMechanism().isEnabled());
+            if (config.getSelfHealingMechanism().getHealthCheck() != null) {
+                summary.put("healthCheckFrequencySec",
+                        config.getSelfHealingMechanism().getHealthCheck().getFrequencySeconds());
+                summary.put("healthMetrics",
+                        config.getSelfHealingMechanism().getHealthCheck().getMetrics());
+            }
+            if (config.getSelfHealingMechanism().getRemediationStrategies() != null) {
+                summary.put("remediationStrategyCount",
+                        config.getSelfHealingMechanism().getRemediationStrategies().size());
+            }
+        }
+
+        if (config.getSelfUpgradeMechanism() != null) {
+            summary.put("upgradeEnabled", config.getSelfUpgradeMechanism().isEnabled());
+            if (config.getSelfUpgradeMechanism().getUpgradePolicy() != null) {
+                summary.put("upgradePolicyType",
+                        config.getSelfUpgradeMechanism().getUpgradePolicy().getType());
+                summary.put("approvalRequired",
+                        config.getSelfUpgradeMechanism().getUpgradePolicy().isApprovalRequired());
+            }
+        }
+
+        if (config.getCoreCapabilities() != null) {
+            if (config.getCoreCapabilities().getPerception() != null) {
+                summary.put("sensorCount",
+                        config.getCoreCapabilities().getPerception().getSensors() != null
+                                ? config.getCoreCapabilities().getPerception().getSensors().size() : 0);
+            }
+            if (config.getCoreCapabilities().getAction() != null) {
+                summary.put("toolCount",
+                        config.getCoreCapabilities().getAction().getActionTools() != null
+                                ? config.getCoreCapabilities().getAction().getActionTools().size() : 0);
+            }
+        }
+
+        return Result.success(summary);
     }
 
     @Scheduled(cron = "0 0 2 * * ?") // 每天凌晨2点

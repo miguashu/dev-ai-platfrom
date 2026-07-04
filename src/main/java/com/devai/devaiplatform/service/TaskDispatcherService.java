@@ -168,6 +168,7 @@ public class TaskDispatcherService {
                 // ==================== 知识检索类 ====================
                 case KNOWLEDGE_SEARCH -> agentService.searchDevLib(content);
                 case MEMORY_SEARCH -> agentService.retrieveMemories(content, "");
+                case WEB_SEARCH -> agentService.searchWeb(content);
 
                 // ==================== 文本处理类 ====================
                 case TEXT_SUMMARY -> agentService.generateTextSummary(content, "请精炼总结");
@@ -197,7 +198,7 @@ public class TaskDispatcherService {
                 }
 
                 // ==================== 通用对话 ====================
-                case GENERAL_CHAT -> agentService.askWithContext(originalMessage, null);
+                case GENERAL_CHAT -> agentService.askWithContext(originalMessage, null, false, false);
 
                 // ==================== 未知/默认 ====================
                 default -> agentService.runDevTask(originalMessage);

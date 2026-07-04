@@ -1,18 +1,28 @@
 package com.devai.devaiplatform.config;
 
-import dev.langchain4j.data.document.splitter.DocumentSplitters;
+import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
+import org.apache.http.Header;
+import org.apache.http.HttpHost;
+import org.apache.http.message.BasicHeader;
+import org.elasticsearch.client.RestClient;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
 
 @Configuration
 public class AiConfig {
@@ -62,6 +72,22 @@ public class AiConfig {
 
     @Value("${llm.fallback.health-check-interval-seconds:60}")
     private Long fallbackHealthCheckInterval;
+
+    // ========== Elasticsearch 向量存储配置 ==========
+    @Value("${vector.store.type:memory}")
+    private String vectorStoreType;
+
+    @Value("${elasticsearch.url:http://127.0.0.1:9200}")
+    private String esUrl;
+
+    @Value("${elasticsearch.index-name:dev-ai-vectors}")
+    private String esIndexName;
+
+    @Value("${elasticsearch.username:}")
+    private String esUsername;
+
+    @Value("${elasticsearch.password:}")
+    private String esPassword;
 
     /**
      * 【云端】DeepSeek 大语言模型 Bean（主模型）
@@ -136,18 +162,55 @@ public class AiConfig {
     }
 
     /**
-     * 内存向量存储
+     * 【默认】内存向量存储 Bean
+     * 当 vector.store.type 不为 elasticsearch 时使用
      */
     @Bean
-    public InMemoryEmbeddingStore embeddingStore() {
-        return new InMemoryEmbeddingStore();
+    @Primary
+    public InMemoryEmbeddingStore<TextSegment> embeddingStore() {
+        System.out.println("[AI配置] 向量存储模式: 内存 (InMemoryEmbeddingStore)");
+        return new InMemoryEmbeddingStore<>();
     }
 
     /**
-     * 文档切片器
+     * 【ES】Elasticsearch 向量存储 Bean
+     * 仅在 vector.store.type=elasticsearch 时启用
      */
     @Bean
-    public dev.langchain4j.data.document.DocumentSplitter documentSplitter() {
-        return DocumentSplitters.recursive(800, 150);
+    @ConditionalOnProperty(name = "vector.store.type", havingValue = "elasticsearch")
+    public EmbeddingStore<TextSegment> elasticsearchEmbeddingStore() {
+        // 检查 ES 连接配置是否完整
+        if (esUrl == null || esUrl.isBlank()) {
+            System.err.println("[AI配置] ⚠️ ES向量存储启用但未配置 elasticsearch.url！");
+        }
+        if (esIndexName == null || esIndexName.isBlank()) {
+            System.err.println("[AI配置] ⚠️ ES向量存储启用但未配置 elasticsearch.index-name！");
+        }
+
+        RestClient restClient = buildEsRestClient();
+        System.out.println("[AI配置] 向量存储模式: Elasticsearch (url=" + esUrl + ", index=" + esIndexName + ")");
+        System.out.println("[AI配置] ES索引将在首次写入时自动创建（含KNN向量映射）");
+
+        return ElasticsearchEmbeddingStore.builder()
+                .restClient(restClient)
+                .indexName(esIndexName)
+                .build();
+    }
+
+    /**
+     * 构建 ES RestClient（含可选 Basic Auth）
+     */
+    private RestClient buildEsRestClient() {
+        var builder = RestClient.builder(HttpHost.create(esUrl));
+        if (esUsername != null && !esUsername.isBlank()
+                && esPassword != null && !esPassword.isBlank()) {
+            String auth = Base64.getEncoder()
+                    .encodeToString((esUsername + ":" + esPassword).getBytes());
+            List<Header> headers = new ArrayList<>();
+            headers.add(new BasicHeader("Authorization", "Basic " + auth));
+            builder.setDefaultHeaders(headers.toArray(new Header[0]));
+            System.out.println("[AI配置] ES已启用Basic认证");
+        }
+        return builder.build();
     }
 }

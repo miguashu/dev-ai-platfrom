@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
+
 /**
  * 带自动降级能力的 ChatLanguageModel 包装器
  * <p>
@@ -123,6 +125,39 @@ public class FallbackChatLanguageModel implements ChatLanguageModel {
                 return Response.from(errorMsg);
             }
         }
+    }
+
+    /**
+     * 【关键】重写带工具规范的 generate 方法
+     * AiServices 调用 @Tool 工具时会走这个方法，必须委托给底层模型
+     * 否则接口默认实现会抛出 "Tools are currently not supported by this model"
+     */
+    @Override
+    public Response<AiMessage> generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
+        ChatLanguageModel activeModel = getActiveModel();
+        System.out.println("[Fallback] 带工具调用 generate, 使用模型: " +
+                (activeModel == primaryModel ? primaryName : fallbackName) +
+                ", 工具数: " + (toolSpecifications != null ? toolSpecifications.size() : 0));
+        return activeModel.generate(messages, toolSpecifications);
+    }
+
+    /**
+     * 获取当前活跃的底层模型（带降级逻辑）
+     */
+    private ChatLanguageModel getActiveModel() {
+        if (useFallback.get()) {
+            if (shouldCheckHealth()) {
+                if (checkPrimaryAvailable()) {
+                    useFallback.set(false);
+                    System.out.println("[LLM降级] ✅ 云端模型 " + primaryName + " 已恢复，自动切回云端");
+                }
+            }
+            if (useFallback.get()) {
+                System.out.println("[LLM降级] 📡 使用本地模型 " + fallbackName + " 处理工具请求");
+                return fallbackModel;
+            }
+        }
+        return primaryModel;
     }
 
     /**

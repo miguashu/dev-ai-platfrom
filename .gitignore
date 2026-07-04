@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Runtime Data ###
+agent_memory/
+uploads/
+*.broken.*
+*.class
+ListMethods.java

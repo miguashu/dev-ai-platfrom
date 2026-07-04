@@ -102,15 +102,23 @@ mvn spring-boot:run
 ```
 dev-ai-platform/
 ├── run-with-jdk17.bat          # 启动脚本（推荐使用）
-── start.bat                   # 旧版启动脚本
+├── start.bat                   # 旧版启动脚本
 ├── pom.xml                     # Maven配置
 ├── src/
 │   ├── main/
 │   │   ├── java/              # Java源码
 │   │   └── resources/         # 配置文件
-│   │       └── static/
-│   │           └── index.html # 前端页面
-└── README_*.md                # 各种使用文档
+│   │       ├── static/
+│   │       │   ├── index.html             # 智能对话前端页面
+│   │       │   └── agent-dashboard.html   # Agent 可视化管理面板
+│   │       ├── agent-config.json          # Agent 全局配置
+│   │       └── application.properties     # 应用配置
+│   └── test/
+│       └── java/
+│           └── AgentConfigTest.java       # Agent 配置单元测试
+├── scripts/                    # 本地操作脚本
+├── agent_memory/               # 记忆持久化存储
+└── README_*.md                 # 各种使用文档
 ```
 
 ## 🔧 常用Maven命令
@@ -139,23 +147,31 @@ mvn dependency:tree
 
 启动成功后，访问以下地址：
 
-- **前端页面**: http://localhost:8081/index.html
-- **API文档**: http://localhost:8081/swagger-ui.html (如果有配置)
+- **智能对话页面**: http://localhost:8081/index.html
+- **Agent 管理面板**: http://localhost:8081/agent-dashboard.html
+- **API 配置接口**: http://localhost:8081/api/dev-ai/agent/config
 
 ##  功能列表
 
 ### 核心功能
-- ✅ **实时对话** - 与AI助手进行智能对话
-- ✅ **PDF上传** - 单文件上传并自动解析入库
+- ✅ **实时对话** - 与AI助手进行智能对话（支持 QA 模式 / Agent 模式切换）
+- ✅ **联网搜索** - 按需获取最新网络信息
+- ✅ **PDF上传** - 单文件上传并自动解析入库（支持 OCR 扫描版）
 - ✅ **批量OCR** - 批量识别图片型PDF
+- ✅ **RAG 知识检索** - 混合检索（向量语义 + 关键词），文档三级分片
 - ✅ **定时蒸馏** - 每天凌晨2点自动处理对话记录
-- ✅ **永久记忆** - 重要知识持久化存储
+- ✅ **永久记忆** - 重要知识持久化存储，支持上下文感知评分
+- ✅ **Agent 自愈管理** - JSON 配置驱动，健康检查/故障诊断/自动修复
+- ✅ **可视化管理面板** - 实时展示 Agent 配置、自愈规则、升级策略
 
 ### API接口
-- `POST /api/dev-ai/agent/run` - 执行Agent任务
-- `POST /api/dev-ai/lib/upload-file` - 上传PDF文件
+- `POST /api/dev-ai/agent/run` - 执行 Agent 任务
+- `POST /api/dev-ai/chat/ask` - 智能问答（含联网搜索开关）
+- `POST /api/dev-ai/lib/upload-file` - 上传 PDF 文件
 - `POST /api/dev-ai/memory/distill-now` - 手动触发蒸馏
 - `GET /api/dev-ai/memory/pending-count` - 查看待处理数量
+- `GET /api/dev-ai/agent/config` - 获取 Agent 完整配置
+- `GET /api/dev-ai/agent/config/summary` - 获取配置摘要
 
 ## ️ 注意事项
 
@@ -188,5 +204,5 @@ A: 确保运行时也使用 Java 17，检查 `java -version` 输出。
 
 ---
 
-**最后更新**: 2024年
-**适用版本**: Dev AI Platform v1.0
+**最后更新**: 2026年7月
+**适用版本**: Dev AI Platform v1.0.0

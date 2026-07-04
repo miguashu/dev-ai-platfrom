@@ -1,0 +1,251 @@
+{
+  "agent_metadata": {
+    "agent_name": "AutoDevRagAgent",
+    "agent_version": "1.0.0",
+    "description": "面向Java AI RAG开发的自愈式本地开发智能体，支持OCR图片识别、ES向量知识库检索、本地脚本执行、日志故障自愈、Git自动升级",
+    "created_timestamp": "2026-07-04T10:00:00Z"
+  },
+  "core_capabilities": {
+    "perception": {
+      "description": "感知用户输入、本地图片、程序运行日志、系统资源指标",
+      "input_types": ["text", "image", "system_logs", "sensor_data"],
+      "sensors": [
+        {
+          "sensor_id": "user_input_sensor",
+          "type": "chat_input_listener",
+          "config": {
+            "listen_port": 8080,
+            "api_path": "/api/ai/agent/chat"
+          }
+        },
+        {
+          "sensor_id": "log_analyze_sensor",
+          "type": "log_file_watcher",
+          "config": {
+            "log_path": "./logs/dev-ai-platform.log",
+            "scan_interval_sec": 10,
+            "error_keywords": ["NoSuchFileException", "Connection refused", "OutOfMemoryError"]
+          }
+        },
+        {
+          "sensor_id": "image_ocr_sensor",
+          "type": "tesseract_ocr",
+          "config": {
+            "tesseract_path": "D:\\ruanjian\\tesseract",
+            "lang": "chi_sim+eng",
+            "max_image_size_mb": 10
+          }
+        },
+        {
+          "sensor_id": "system_metric_sensor",
+          "type": "system_monitor",
+          "config": {
+            "collect_cpu": true,
+            "collect_memory": true,
+            "collect_disk": true
+          }
+        }
+      ]
+    },
+    "cognition": {
+      "description": "意图识别、CoT思维链规划、ES向量知识库检索决策",
+      "planning_engine": {
+        "type": "tree_of_thoughts",
+        "config": {
+          "max_reason_steps": 5,
+          "enable_tool_loop": true,
+          "llm_provider": "ollama",
+          "ollama_url": "http://127.0.0.1:11434",
+          "model_name": "qwen7b"
+        }
+      },
+      "knowledge_base": {
+        "type": "vector_db",
+        "connection_string": "http://127.0.0.1:9200/dev-ai-vectors",
+        "config": {
+          "top_n_retrieve": 3,
+          "min_similarity_score": 0.65
+        }
+      }
+    },
+    "action": {
+      "description": "本地文件操作、Shell脚本执行、OCR识别、ES索引管理、日志清理",
+      "action_tools": [
+        {
+          "tool_name": "local_file_operate",
+          "parameters": {
+            "support_read": true,
+            "support_write": true,
+            "support_scan_dir": true,
+            "allow_path_prefix": ["D:\\ruanjian", "E:\\ruanjian"]
+          }
+        },
+        {
+          "tool_name": "execute_shell_command",
+          "parameters": {
+            "os_type": "windows",
+            "timeout_sec": 30,
+            "block_risk_cmd": ["rm -rf", "format", "del /f /s /q C:\\*"]
+          }
+        },
+        {
+          "tool_name": "ocr_image_parse",
+          "parameters": {
+            "preprocess_image": true,
+            "output_text_save_path": "./temp/ocr_cache"
+          }
+        },
+        {
+          "tool_name": "es_vector_manage",
+          "parameters": {
+            "support_add_segment": true,
+            "support_delete_index": true,
+            "support_batch_embedding": true
+          }
+        },
+        {
+          "tool_name": "system_cache_clean",
+          "parameters": {
+            "temp_dir": "./temp",
+            "log_expire_days": 7
+          }
+        }
+      ]
+    }
+  },
+  "self_healing_mechanism": {
+    "enabled": true,
+    "health_check": {
+      "frequency_seconds": 60,
+      "metrics": [
+        "response_time_ms",
+        "error_rate",
+        "memory_usage_percent",
+        "cpu_usage_percent",
+        "es_connect_status",
+        "ollama_connect_status"
+      ],
+      "thresholds": {
+        "response_time_ms": { "warning": 5000, "critical": 10000 },
+        "error_rate": { "warning": 0.05, "critical": 0.1 },
+        "memory_usage_percent": { "warning": 80, "critical": 92 },
+        "cpu_usage_percent": { "warning": 85, "critical": 95 }
+      }
+    },
+    "diagnosis": {
+      "description": "分层故障诊断：依赖服务检测系统资源日志异常检索",
+      "diagnosis_steps": [
+        {
+          "step_id": "1",
+          "description": "检测Ollama大模型服务连通性",
+          "action": "ping_dependency",
+          "parameters": { "service_name": "ollama", "check_url": "http://127.0.0.1:11434/api/tags" }
+        },
+        {
+          "step_id": "2",
+          "description": "检测Elasticsearch向量库连通性",
+          "action": "ping_dependency",
+          "parameters": { "service_name": "elasticsearch", "check_url": "http://127.0.0.1:9200" }
+        },
+        {
+          "step_id": "3",
+          "description": "采集内存、CPU占用指标",
+          "action": "analyze_system_metrics",
+          "parameters": { "metric": "all" }
+        },
+        {
+          "step_id": "4",
+          "description": "扫描日志中高频异常堆栈",
+          "action": "scan_error_logs",
+          "parameters": { "scan_lines": 2000 }
+        }
+      ]
+    },
+    "remediation_strategies": [
+      {
+        "strategy_id": "restart_agent_process",
+        "description": "重启SpringBoot Agent服务进程恢复响应卡顿/高频报错",
+        "trigger_condition": "error_rate > 0.1 || response_time_ms > 10000",
+        "action": {
+          "type": "shell_command",
+          "command": "taskkill /f /im java.exe && start cmd /c java -jar target/dev-ai-platform.jar"
+        },
+        "rollback_plan": "重启后健康检查失败，触发自动升级流程"
+      },
+      {
+        "strategy_id": "clear_temp_cache",
+        "description": "清理OCR缓存、向量临时文件释放内存",
+        "trigger_condition": "memory_usage_percent > 90",
+        "action": {
+          "type": "function_call",
+          "function_name": "clear_temp_storage"
+        }
+      },
+      {
+        "strategy_id": "reconnect_es",
+        "description": "重建ES客户端连接，处理向量库断连",
+        "trigger_condition": "es_connect_status == false",
+        "action": {
+          "type": "function_call",
+          "function_name": "rebuild_es_client"
+        }
+      },
+      {
+        "strategy_id": "reboot_ollama",
+        "description": "重启Ollama本地模型服务解决模型加载卡死",
+        "trigger_condition": "ollama_connect_status == false",
+        "action": {
+          "type": "shell_command",
+          "command": "taskkill /f /im ollama.exe && ollama serve"
+        }
+      }
+    ]
+  },
+  "self_upgrade_mechanism": {
+    "enabled": false,
+    "upgrade_policy": {
+      "type": "manual",
+      "approval_required": true
+    },
+    "source": {
+      "type": "git_repository",
+      "url": "https://github.com/miguashu/dev-ai-platform",
+      "branch": "main"
+    },
+    "upgrade_triggers": [
+      {
+        "trigger_id": "timed_version_check",
+        "description": "每日凌晨2点远程校验仓库新版本",
+        "frequency_seconds": 86400,
+        "action": "compare_local_version_with_remote"
+      },
+      {
+        "trigger_id": "heal_all_failed",
+        "description": "全部自愈策略执行后故障仍存在，启动升级修复",
+        "action": "rollback_and_upgrade"
+      }
+    ],
+    "upgrade_process": {
+      "steps": [
+        { "step": "1", "description": "Git拉取最新main分支代码" },
+        { "step": "2", "description": "备份当前target打包产物、配置文件" },
+        { "step": "3", "description": "停止运行中的Agent Java进程" },
+        { "step": "4", "description": "执行mvn clean package打包新版本" },
+        { "step": "5", "description": "迁移application.properties、ES向量索引配置" },
+        { "step": "6", "description": "启动新版本Jar程序" },
+        { "step": "7", "description": "执行3轮全量健康检测验证升级成功" }
+      ],
+      "rollback_on_failure": true
+    }
+  },
+  "communication_protocol": {
+    "api_endpoint": "http://localhost:8080/api/v1",
+    "message_format": "json",
+    "authentication": {
+      "type": "api_key",
+      "credentials": {
+        "api_key": "devai-local-20260704-secret"
+      }
+    }
+  }
+}

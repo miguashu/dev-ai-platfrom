@@ -4,6 +4,7 @@ import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
@@ -26,18 +27,18 @@ import java.util.List;
 @Service
 public class OcrService {
 
-    private static final String TESSDATA_PATH = "./tessdata"; // OCR语言数据路径
     private static final String LANGUAGE = "chi_sim+eng"; // 简体中文 + 英文
     
     private final Tesseract tesseract;
 
-    public OcrService() {
+    public OcrService(@Value("${tesseract.data-path:./tessdata}") String tessdataPath) {
         this.tesseract = new Tesseract();
         
         // 配置OCR参数
         try {
-            // 设置 tessdata 路径（需要下载 chi_sim.traineddata 和 eng.traineddata）
-            tesseract.setDatapath(TESSDATA_PATH);
+            // 设置 tessdata 路径（从 application.properties 读取 tesseract.data-path）
+            System.out.println("[OCR服务] 使用 tessdata 路径: " + tessdataPath);
+            tesseract.setDatapath(tessdataPath);
             tesseract.setLanguage(LANGUAGE);
             
             // OCR性能优化配置

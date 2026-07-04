@@ -1,6 +1,7 @@
 package com.devai.devaiplatform.service;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.service.AiServices;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
@@ -20,12 +21,20 @@ public class IntentAnalyzerService {
 
     private final ChatLanguageModel chatModel;
     private final PersistentMemoryService memoryService;
+    private final IntentAgent intentAgent;
 
     public IntentAnalyzerService(ChatLanguageModel chatModel,
-                                  PersistentMemoryService memoryService) {
+                                 PersistentMemoryService memoryService) {
         this.chatModel = chatModel;
         this.memoryService = memoryService;
+
+        this.intentAgent = AiServices.builder(IntentAgent.class)
+                .chatLanguageModel(chatModel)
+                .tools(new IntentTools())
+                .systemMessageProvider(chatMemory -> INTENT_SYSTEM_PROMPT)
+                .build();
     }
+
 
     /**
      * 分析用户消息，返回意图分析结果
@@ -92,17 +101,21 @@ public class IntentAnalyzerService {
     }
 
     /**
-     * 调用AI模型
+     * 调用AI模型（智能体模式）
      */
     private String callAI(String prompt) {
         try {
-            return chatModel.generate(prompt);
+            return intentAgent.analyzeIntent(prompt);
         } catch (Exception e) {
             System.err.println("[意图分析] AI调用失败: " + e.getMessage());
-            // 返回默认JSON，走通用对话
             return "{\"understoodRequirement\":\"AI分析失败\",\"primaryIntent\":\"GENERAL_CHAT\",\"confidence\":0.5,\"isMultiTask\":false,\"extractedContent\":\"\",\"subTasks\":[]}";
         }
     }
+
+    // ... existing code ...
+
+
+
 
     /**
      * 解析AI返回的分析结果
@@ -302,5 +315,41 @@ public class IntentAnalyzerService {
         if (str == null) return "null";
         if (str.length() <= maxLen) return str;
         return str.substring(0, maxLen) + "...";
+    }
+
+    private static final String INTENT_SYSTEM_PROMPT = """
+            你是一个专业的意图分析引擎，负责精准识别用户消息的真实意图。
+
+            【核心职责】
+            1. 分析用户消息，识别其核心意图
+            2. 判断是否为复合任务，如果是则拆分为多个子任务
+            3. 提取关键内容（代码、SQL、需求描述等）
+            4. 评估置信度（0-1）
+
+            【网页搜索识别规则】
+            当用户消息明显涉及以下场景时，primaryIntent 应设为 WEB_SEARCH：
+            - 询问"最新"、"最近"、"当前最新版本"等时效性信息
+            - 询问不熟悉的第三方框架、库、工具的用法
+            - 要求对比不同技术方案/产品（需要联网查证）
+            - 询问行业动态、技术趋势、新闻资讯
+            - 询问开源项目的最新进展、GitHub star数等实时数据
+            - 消息中明确提到"搜索"、"查一下"、"上网搜"、"网上查"
+
+            【输出规则】
+            - 必须严格返回JSON格式，不要包含任何额外文字
+            - primaryIntent 必须从给定的意图列表中选择
+            - confidence 为 0.0 到 1.0 之间的浮点数
+            - 如果是复合任务，isMultiTask 为 true，并在 subTasks 中列出每个子任务
+            """;
+
+    public interface IntentAgent {
+        String analyzeIntent(String userMessage);
+    }
+
+    public class IntentTools {
+        @dev.langchain4j.agent.tool.Tool("检索历史记忆，辅助判断用户意图是否与历史问题相关")
+        public String searchMemory(String query) {
+            return memoryService.getRelevantMemories(query);
+        }
     }
 }

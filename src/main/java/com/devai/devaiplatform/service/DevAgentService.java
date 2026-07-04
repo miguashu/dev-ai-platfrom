@@ -1,6 +1,8 @@
 package com.devai.devaiplatform.service;
 
 
+import com.devai.devaiplatform.config.agent.AgentConfig;
+import com.devai.devaiplatform.config.agent.AgentConfigService;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.service.AiServices;
@@ -12,6 +14,7 @@ import java.util.Map;
 @Service
 public class DevAgentService {
     private final ChatLanguageModel chatModel;
+    private final AgentConfigService agentConfigService;
     private final DevRagService ragService;
     private final VectorStoreService vectorStoreService;
     private final PersistentMemoryService memoryService;
@@ -20,6 +23,7 @@ public class DevAgentService {
     private final LocalFileOperationService fileOperationService;
     private final ProjectStructureGenerator projectStructureGenerator;
     private final ScriptExecutorService scriptExecutorService;
+    private final WebSearchService webSearchService;
 
     public DevAgentService(ChatLanguageModel chatModel,
                            DevRagService ragService,
@@ -29,9 +33,12 @@ public class DevAgentService {
                            IdeaErrorAnalyzerService ideaErrorAnalyzerService,
                            LocalFileOperationService fileOperationService,
                            ProjectStructureGenerator projectStructureGenerator,
-                           ScriptExecutorService scriptExecutorService
+                           ScriptExecutorService scriptExecutorService,
+                           WebSearchService webSearchService,
+                           AgentConfigService agentConfigService
     ) {
         this.chatModel = chatModel;
+        this.agentConfigService = agentConfigService;
         this.ragService = ragService;
         this.vectorStoreService = vectorStoreService;
         this.memoryService = memoryService;
@@ -40,6 +47,7 @@ public class DevAgentService {
         this.fileOperationService = fileOperationService;
         this.projectStructureGenerator = projectStructureGenerator;
         this.scriptExecutorService = scriptExecutorService;
+        this.webSearchService = webSearchService;
     }
 
     /**
@@ -453,29 +461,24 @@ public class DevAgentService {
         return safeGenerate(prompt);
     }
 
+    // ==================== 网页搜索与信息检索工具 ====================
 
-// ... existing code ...
+    /**
+     * 【新增】网络信息搜索 - 多轮筛选确保信息完整
+     * 适用于：查询最新技术文档、API 用法、开源项目、技术方案对比等
+     */
+    @Tool("在网络中搜索相关技术信息，经过多轮筛选去重后返回高质量内容。适用于：查询最新技术动态、API文档、开源方案、技术对比、行业资讯等需要实时网络资料的场景")
+    public String searchWeb(String query) {
+        System.out.println("[工具调用] 网络搜索: " + query);
+        try {
+            WebSearchService.WebSearchResult result = webSearchService.search(query);
+            return result.toPromptContext();
+        } catch (Exception e) {
+            System.err.println("[工具调用] 网络搜索失败: " + e.getMessage());
+            return "网络搜索失败: " + e.getMessage() + "。请基于已有知识回答用户问题。";
+        }
+    }
 
-//    @Tool("清空向量知识库并重新初始化")
-//    public String resetKnowledgeBase() {
-//        System.out.println("[工具调用] 重置知识库");
-//        vectorStoreService.clearVectorStore();
-//        return "✅ 知识库已清空，可以重新上传文档";
-//    }
-//
-//    @Tool("获取当前系统状态统计信息（知识库片段数、缓存命中率等）")
-//    public String getSystemStats() {
-//        System.out.println("[工具调用] 获取系统状态");
-//        Map<String, Object> stats = new HashMap<>();
-//
-//        // 向量库统计
-//        VectorStoreService.VectorStoreStats vsStats = vectorStoreService.getStats();
-//        stats.put("vectorStore", vsStats);
-//
-//
-//
-//        return "系统状态：\n" + stats.toString();
-//    }
 
     // ==================== Agent执行入口 ====================
 
@@ -506,11 +509,9 @@ public class DevAgentService {
     /**
      * 带上下文的任务处理（支持多轮对话）
      *
-     * @param taskContent 当前任务
-     * @param context 历史对话上下文
      * @return 任务执行结果
      */
-    public String runTaskWithContext(String taskContent, String context) {
+    public String runTaskWithContext(TaskAnalysisResult analysis) {
         System.out.println("\n========== Agent执行带上下文的任务 ==========");
 
         DevAgent agent = AiServices.builder(DevAgent.class)
@@ -518,12 +519,40 @@ public class DevAgentService {
                 .tools(this)
                 .systemMessageProvider(chatMemory -> AGENT_SYSTEM_PROMPT)
                 .build();
-
-        String prompt = "历史上下文：\n" + context + "\n\n当前任务：" + taskContent;
-        String result = agent.handleTask(prompt);
+       // 将 analysis 对象序列化为任务描述字符串
+        String taskDescription = buildTaskDescription(analysis);
+        System.out.println("任务描述字符串 = " + taskDescription);
+        String result = agent.handleTask(taskDescription);
 
         System.out.println("\n========== 任务执行完成 ==========\n");
         return result;
+    }
+
+    /**
+     * 将 TaskAnalysisResult 对象转换为可传递给 Agent 的文本描述
+     */
+    private String buildTaskDescription(TaskAnalysisResult analysis) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("【任务分析结果】\n");
+        sb.append("- 原始消息: ").append(analysis.getOriginalMessage()).append("\n");
+        sb.append("- 识别意图: ").append(analysis.getPrimaryIntent().getDisplayName()).append("\n");
+        sb.append("- 置信度: ").append(String.format("%.1f%%", analysis.getConfidence() * 100)).append("\n");
+        if (analysis.getUnderstoodRequirement() != null && !analysis.getUnderstoodRequirement().isBlank()) {
+            sb.append("- 需求理解: ").append(analysis.getUnderstoodRequirement()).append("\n");
+        }
+        if (analysis.getExtractedContent() != null && !analysis.getExtractedContent().isBlank()) {
+            sb.append("- 提取内容: ").append(analysis.getExtractedContent()).append("\n");
+        }
+        if (analysis.getRelevantMemories() != null && !analysis.getRelevantMemories().isBlank()) {
+            sb.append("- 关联记忆: ").append(analysis.getRelevantMemories()).append("\n");
+        }
+        if (analysis.isMultiTask() && !analysis.getSubTasks().isEmpty()) {
+            sb.append("- 复合任务, 包含 ").append(analysis.getSubTasks().size()).append(" 个子任务:\n");
+            for (var sub : analysis.getSubTasks()) {
+                sb.append("  ").append(sub.toString()).append("\n");
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -532,26 +561,66 @@ public class DevAgentService {
      *
      * @param question 当前问题
      * @param contextHistory 历史对话上下文（格式："用户: xxx\nAI: yyy\n..."）
+     * @param enableRag 是否启用RAG检索（默认false）
+     * @param enableWebSearch 是否启用联网搜索（默认false）
      * @return AI回答
      */
-    public String askWithContext(String question, String contextHistory) {
+    public String askWithContext(String question, String contextHistory, boolean enableRag, boolean enableWebSearch) {
         System.out.println("\n========== 带上下文问答 ==========");
         System.out.println("当前问题: " + question);
         System.out.println("上下文长度: " + (contextHistory != null ? contextHistory.length() : 0) + " 字符");
+        System.out.println("RAG检索: " + (enableRag ? "开启" : "关闭"));
+        System.out.println("联网搜索: " + (enableWebSearch ? "开启" : "关闭"));
         System.out.println("======================================\n");
 
         // 构建带上下文的prompt，使用模板
         String safeContext = (contextHistory != null && !contextHistory.trim().isEmpty()) ? contextHistory : "";
         String prompt = String.format(PromptTemplate.CHAT_WITH_CONTEXT_TEMPLATE, safeContext, question);
 
-        // 添加记忆增强
-        String relevantMemories = memoryService.getRelevantMemories(question);
-        if (!relevantMemories.isEmpty()) {
-            prompt = prompt + "\n\n" + relevantMemories;
+        String citations = "";  // 引用标注
+
+        // 1. 联网搜索（优先级最高，获取实时信息）
+        if (enableWebSearch) {
+            try {
+                WebSearchService.WebSearchResult webResult = webSearchService.search(question);
+                if (webResult.hasResult) {
+                    String webContext = webResult.toPromptContext();
+                    prompt = prompt + "\n\n" + webContext;
+                    System.out.println("[联网搜索] 已注入搜索结果，长度: " + webContext.length() + " 字符");
+                } else {
+                    System.out.println("[联网搜索] 未找到相关网页信息");
+                }
+            } catch (Exception e) {
+                System.err.println("[联网搜索] 搜索失败: " + e.getMessage());
+            }
+        }
+
+        // 2. RAG向量库检索
+        if (enableRag) {
+            String ragContext = ragService.retrieveRelevantContent(question);
+            if (!ragContext.isEmpty()) {
+                prompt = prompt + "\n\n" + ragContext;
+                System.out.println("[RAG] 已注入向量库检索结果，长度: " + ragContext.length() + " 字符");
+                citations = buildRagCitations(ragContext);
+            } else {
+                System.out.println("[RAG] 向量库中未检索到相关内容");
+            }
+
+            // 3. 检索永久记忆
+            String relevantMemories = memoryService.getRelevantMemories(question);
+            if (!relevantMemories.isEmpty()) {
+                prompt = prompt + "\n\n【历史记忆】\n" + relevantMemories;
+                System.out.println("[记忆] 已注入相关记忆");
+            }
         }
 
         try {
             String result = chatModel.generate(prompt);
+
+            // 【引用标注】在答案末尾附加文件来源
+            if (!citations.isEmpty()) {
+                result = result + citations;
+            }
 
             System.out.println("\n========== 问答完成 ==========\n");
 
@@ -566,13 +635,53 @@ public class DevAgentService {
         }
     }
 
+    /**
+     * 从RAG检索上下文中提取文件名，生成引用标注
+     */
+    private String buildRagCitations(String ragContext) {
+        if (ragContext == null || ragContext.isEmpty()) return "";
+
+        java.util.LinkedHashSet<String> files = new java.util.LinkedHashSet<>();
+        // 匹配 "--- 来源: xxx ---" 格式
+        String[] lines = ragContext.split("\n");
+        for (String line : lines) {
+            if (line.startsWith("--- 来源: ") && line.endsWith(" ---")) {
+                String fileName = line.substring(7, line.length() - 4).trim();
+                if (!fileName.isEmpty() && !"未知来源".equals(fileName)) {
+                    files.add(fileName);
+                }
+            }
+        }
+
+        if (files.isEmpty()) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n\n---\n");
+        sb.append("📚 **参考文件**：\n");
+        int idx = 1;
+        for (String file : files) {
+            String encodedName = file.replace(" ", "%20");
+            sb.append("- [").append(idx).append(". ").append(file)
+              .append("](/api/dev-ai/file/preview?name=").append(encodedName).append(")\n");
+            idx++;
+        }
+        return sb.toString();
+    }
+
     // ==================== Agent交互接口定义 ====================
 
     /**
      * Agent系统提示词 - 明确告知AI它拥有的工具能力
      */
+    /**
+     * 获取当前Agent配置（用于管理面板展示）
+     */
+    public AgentConfig getAgentConfig() {
+        return agentConfigService.getConfig();
+    }
+
     private static final String AGENT_SYSTEM_PROMPT = """
-            你是一个强大的AI开发助手，拥有直接操作本地文件系统的能力。你可以：
+            你是一个强大的AI开发助手，拥有直接操作本地文件系统、检索知识库和搜索网络信息的能力。你可以：
 
             【重要】你拥有以下能力，当用户需要时，你必须直接调用工具执行，而不是说"我无法做到"：
 
@@ -585,6 +694,24 @@ public class DevAgentService {
             7. **扫描编译错误** - 你可以扫描IDEA编译错误并给出修复方案
             8. **分析运行时异常** - 你可以分析异常堆栈并定位问题
             9. **执行本地脚本** - 你可以调用executeScript工具执行预定义的bat脚本进行文件操作
+            10. **网络信息搜索** - 你可以通过searchWeb工具搜索网络上的最新技术文档、API用法、开源方案等
+
+            【网络搜索说明】
+            - 当用户询问最新技术、不熟悉的框架/工具、需要实时信息的场景，请主动调用searchWeb
+            - searchWeb已内置多轮筛选和去重机制，返回的是高质量、去重后的搜索结果
+            - 搜索结果会包含来源URL和内容摘要，请在回答中标注信息来源
+            - 如果搜索结果不足以完全回答，结合你的知识补充说明
+
+            【溯源引用规则 - 数据有据可查】
+            当你的回答使用了知识库文件或网络搜索结果时，必须遵守以下规则：
+            1. 正文中明确提及引用的文件名，例如"根据《xxx.pdf》..."或"参考知识库中《xxx》..."
+            2. 如果使用了searchWeb工具返回的网络搜索结果：
+               - 正文中用 [1]、[2] 标注每个来自搜索结果的事实
+               - 回答末尾用 Markdown 可点击链接列出所有参考来源
+            3. 如果使用了searchDevLib工具返回的知识库内容：
+               - 正文中提及引用的文件名
+               - 系统会自动在回答末尾附加 📚 **参考文件** 链接
+            4. 明确区分哪些内容来自知识库/搜索结果，哪些来自你的已有知识
 
             【脚本执行】
             当需要批量文件操作或系统级操作时，优先使用executeScript工具调用对应脚本：

@@ -8,6 +8,7 @@ import org.apache.http.HttpHost;
 import org.apache.http.message.BasicHeader;
 import org.elasticsearch.client.RestClient;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 当vector.store.type=elasticsearch时启用，数据持久化到ES
  */
 @Service
+@ConditionalOnProperty(name = "vector.store.type", havingValue = "elasticsearch")
 public class ElasticsearchVectorStoreService {
 
     @Value("${elasticsearch.url:http://127.0.0.1:9200}")
@@ -54,6 +56,8 @@ public class ElasticsearchVectorStoreService {
     private EmbeddingStore<TextSegment> buildStore() {
         RestClient restClient = buildRestClient();
         System.out.println("[ES向量库] 初始化连接: " + esUrl + ", 索引: " + indexName);
+        System.out.println("[ES向量库] 索引将由首次 add() 自动创建（含KNN映射）");
+
         return ElasticsearchEmbeddingStore.builder()
                 .restClient(restClient)
                 .indexName(indexName)

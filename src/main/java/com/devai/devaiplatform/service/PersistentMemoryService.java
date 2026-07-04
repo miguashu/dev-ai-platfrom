@@ -3,6 +3,7 @@ package com.devai.devaiplatform.service;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 
@@ -33,8 +34,9 @@ public class PersistentMemoryService {
     // 内存中的记忆存储（运行时快速访问）
     private final Map<String, MemoryEntry> memoryStore = new ConcurrentHashMap<>();
 
-    // JSON序列化器
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    // JSON序列化器（配置支持 Java 8 时间类型）
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule());
 
 
     // 归档文件路径（用于备份）
@@ -369,11 +371,12 @@ public class PersistentMemoryService {
                 mem.setImportance((Integer) data.get("importance"));
                 mem.setAccessCount((Integer) data.getOrDefault("accessCount", 0));
 
+                // 【修复】安全解析日期时间，支持多种格式
                 if (data.get("createdAt") != null) {
-                    mem.setCreatedAt(LocalDateTime.parse((String) data.get("createdAt")));
+                    mem.setCreatedAt(parseDateTime((String) data.get("createdAt")));
                 }
                 if (data.get("lastAccessedAt") != null) {
-                    mem.setLastAccessedAt(LocalDateTime.parse((String) data.get("lastAccessedAt")));
+                    mem.setLastAccessedAt(parseDateTime((String) data.get("lastAccessedAt")));
                 }
 
                 memoryStore.put(entry.getKey(), mem);
@@ -393,6 +396,35 @@ public class PersistentMemoryService {
             memoryStore.clear();
             saveMemoriesToFile();
             System.out.println("[记忆服务] 已重置为空记忆库");
+        }
+    }
+
+    /**
+     * 解析日期时间字符串，支持多种格式
+     * @param dateTimeStr 日期时间字符串
+     * @return LocalDateTime 对象
+     */
+    private LocalDateTime parseDateTime(String dateTimeStr) {
+        if (dateTimeStr == null || dateTimeStr.isEmpty()) {
+            return LocalDateTime.now();
+        }
+
+        try {
+            // 尝试解析 ISO 8601 格式（带 Z 或时区偏移）
+            if (dateTimeStr.contains("Z") || dateTimeStr.contains("+") || dateTimeStr.contains("-0")) {
+                // 移除毫秒部分（如果存在）
+                String normalized = dateTimeStr.replace("Z", "+00:00");
+                // 使用 OffsetDateTime 解析带时区的格式
+                java.time.OffsetDateTime offsetDateTime = java.time.OffsetDateTime.parse(normalized);
+                return offsetDateTime.toLocalDateTime();
+            } else {
+                // 标准 LocalDateTime 格式
+                return LocalDateTime.parse(dateTimeStr);
+            }
+        } catch (Exception e) {
+            System.err.println("[记忆服务] 日期解析失败: " + dateTimeStr + ", 错误: " + e.getMessage());
+            // 解析失败时返回当前时间
+            return LocalDateTime.now();
         }
     }
 
