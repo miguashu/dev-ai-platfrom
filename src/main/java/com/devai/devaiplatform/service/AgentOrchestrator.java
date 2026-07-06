@@ -307,6 +307,19 @@ public class AgentOrchestrator {
         return false;
     }
 
+    // ==================== 直接对话（不走工具链） ====================
+
+    /**
+     * 简单问题直接调LLM回答，不走任何Agent/工具链
+     * 用于 MessageRouterService 判定为 DIRECT_CHAT 的场景
+     */
+    public String directChat(String taskContent) {
+        reportProgress("info", "简单问题，直接回答");
+        String result = chatModel.generate(taskContent);
+        reportProgress("done", "回答完成");
+        return result;
+    }
+
     // ==================== 编排器 ====================
 
     record AgentResult(String agent, String result) {}

@@ -64,145 +64,147 @@ public class TaskDispatcherService {
         System.out.println("[路由] 意图: " + intent.getDisplayName() + ", 内容长度: " + content.length());
 
         try {
-            return switch (intent) {
+            String result;
+            switch (intent) {
                 // ==================== 代码生成类 ====================
-                case BACKEND_CODE_GEN -> agentService.generateContent("backend_code", content);
-                case FRONTEND_CODE_GEN -> agentService.generateContent("frontend_code", content);
-                case CRUD_CODE_GEN -> agentService.generateContent("crud_sql", content);
-                case API_CALL_GEN -> agentService.generateContent("api_call_code", content);
-                case VALIDATION_CODE_GEN -> agentService.generateContent("validation_code", content);
-                case MIGRATION_SCRIPT_GEN -> agentService.generateContent("migration_script", content);
-                case CONFIG_FILE_GEN -> agentService.generateContent("config_file", "通用配置\n" + content);
+                case BACKEND_CODE_GEN: result = agentService.generateContent("backend_code", content); break;
+                case FRONTEND_CODE_GEN: result = agentService.generateContent("frontend_code", content); break;
+                case CRUD_CODE_GEN: result = agentService.generateContent("crud_sql", content); break;
+                case API_CALL_GEN: result = agentService.generateContent("api_call_code", content); break;
+                case VALIDATION_CODE_GEN: result = agentService.generateContent("validation_code", content); break;
+                case MIGRATION_SCRIPT_GEN: result = agentService.generateContent("migration_script", content); break;
+                case CONFIG_FILE_GEN: result = agentService.generateContent("config_file", "通用配置\n" + content); break;
 
                 // ==================== 测试类 ====================
-                case UNIT_TEST_GEN -> agentService.generateContent("unit_test", content);
-                case INTEGRATION_TEST_GEN -> {
-                    String prompt = String.format(PromptTemplate.INTEGRATION_TEST_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case UNIT_TEST_GEN: result = agentService.generateContent("unit_test", content); break;
+                case INTEGRATION_TEST_GEN: {
+                    String p = String.format(PromptTemplate.INTEGRATION_TEST_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 代码审查类 ====================
-                case CODE_REVIEW -> agentService.generateContent("code_review", content);
-                case CODE_REFACTOR -> agentService.generateContent("refactoring", content);
-                case CODE_COMMENT -> {
-                    String prompt = String.format(PromptTemplate.CODE_COMMENT_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case CODE_REVIEW: result = agentService.generateContent("code_review", content); break;
+                case CODE_REFACTOR: result = agentService.generateContent("refactoring", content); break;
+                case CODE_COMMENT: {
+                    String p = String.format(PromptTemplate.CODE_COMMENT_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== SQL/数据库类 ====================
-                case SQL_OPTIMIZE -> agentService.generateContent("sql_optimize", content);
-                case SQL_REWRITE -> agentService.generateContent("sql_rewrite", content);
-                case INDEX_DESIGN -> agentService.generateContent("sql_design", content);
-                case EXPLAIN_ANALYSIS -> agentService.generateContent("explain_analysis", content);
-                case TABLE_SCHEMA_DESIGN -> agentService.generateContent("table_design", content);
+                case SQL_OPTIMIZE: result = agentService.generateContent("sql_optimize", content); break;
+                case SQL_REWRITE: result = agentService.generateContent("sql_rewrite", content); break;
+                case INDEX_DESIGN: result = agentService.generateContent("sql_design", content); break;
+                case EXPLAIN_ANALYSIS: result = agentService.generateContent("explain_analysis", content); break;
+                case TABLE_SCHEMA_DESIGN: result = agentService.generateContent("table_design", content); break;
 
                 // ==================== 文档生成类 ====================
-                case API_DOC_GEN -> agentService.generateContent("api_doc", content);
-                case PRD_DOC_GEN -> agentService.generateContent("prd_doc", content);
-                case TECH_SOLUTION_DOC -> {
-                    String prompt = String.format(PromptTemplate.TECH_SOLUTION_DOC_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case API_DOC_GEN: result = agentService.generateContent("api_doc", content); break;
+                case PRD_DOC_GEN: result = agentService.generateContent("prd_doc", content); break;
+                case TECH_SOLUTION_DOC: {
+                    String p = String.format(PromptTemplate.TECH_SOLUTION_DOC_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case CHANGELOG_GEN -> {
-                    String prompt = String.format(PromptTemplate.CHANGELOG_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case CHANGELOG_GEN: {
+                    String p = String.format(PromptTemplate.CHANGELOG_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 分析排查类 ====================
-                case ERROR_LOG_ANALYSIS -> agentService.analyzeErrorLog(content);
-                case MEMORY_LEAK_DEBUG -> {
-                    String prompt = String.format(PromptTemplate.MEMORY_LEAK_DEBUG_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case ERROR_LOG_ANALYSIS: result = agentService.analyzeErrorLog(content); break;
+                case MEMORY_LEAK_DEBUG: {
+                    String p = String.format(PromptTemplate.MEMORY_LEAK_DEBUG_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case DEADLOCK_ANALYSIS -> {
-                    String prompt = String.format(PromptTemplate.DEADLOCK_ANALYSIS_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case DEADLOCK_ANALYSIS: {
+                    String p = String.format(PromptTemplate.DEADLOCK_ANALYSIS_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case PERFORMANCE_DEBUG -> {
-                    String prompt = String.format(PromptTemplate.API_PERFORMANCE_DEBUG_TEMPLATE, content, "未知", "未知");
-                    yield chatModel.generate(prompt);
+                case PERFORMANCE_DEBUG: {
+                    String p = String.format(PromptTemplate.API_PERFORMANCE_DEBUG_TEMPLATE, content, "未知", "未知");
+                    result = chatModel.generate(p); break;
                 }
-                case SECURITY_SCAN -> {
-                    String prompt = String.format(PromptTemplate.SECURITY_VULNERABILITY_SCAN_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case SECURITY_SCAN: {
+                    String p = String.format(PromptTemplate.SECURITY_VULNERABILITY_SCAN_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 架构设计类 ====================
-                case ARCHITECTURE_DESIGN -> {
-                    String prompt = String.format(PromptTemplate.ARCHITECTURE_DESIGN_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case ARCHITECTURE_DESIGN: {
+                    String p = String.format(PromptTemplate.ARCHITECTURE_DESIGN_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case API_DESIGN -> {
-                    String prompt = String.format(PromptTemplate.API_DESIGN_STANDARD_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case API_DESIGN: {
+                    String p = String.format(PromptTemplate.API_DESIGN_STANDARD_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case MICROSERVICE_SPLIT -> {
-                    String prompt = String.format(PromptTemplate.MICROSERVICE_SPLIT_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case MICROSERVICE_SPLIT: {
+                    String p = String.format(PromptTemplate.MICROSERVICE_SPLIT_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case CACHE_DESIGN -> {
-                    String prompt = String.format(PromptTemplate.CACHE_DESIGN_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case CACHE_DESIGN: {
+                    String p = String.format(PromptTemplate.CACHE_DESIGN_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 性能优化类 ====================
-                case JVM_TUNING -> {
-                    String prompt = String.format(PromptTemplate.JVM_TUNING_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case JVM_TUNING: {
+                    String p = String.format(PromptTemplate.JVM_TUNING_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case CONCURRENCY_OPTIMIZE -> {
-                    String prompt = String.format(PromptTemplate.CONCURRENCY_OPTIMIZATION_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case CONCURRENCY_OPTIMIZE: {
+                    String p = String.format(PromptTemplate.CONCURRENCY_OPTIMIZATION_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== DevOps类 ====================
-                case DOCKERFILE_OPTIMIZE -> {
-                    String prompt = String.format(PromptTemplate.DOCKERFILE_OPTIMIZE_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case DOCKERFILE_OPTIMIZE: {
+                    String p = String.format(PromptTemplate.DOCKERFILE_OPTIMIZE_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case K8S_DEPLOYMENT -> {
-                    String prompt = String.format(PromptTemplate.K8S_DEPLOYMENT_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case K8S_DEPLOYMENT: {
+                    String p = String.format(PromptTemplate.K8S_DEPLOYMENT_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 知识检索类 ====================
-                case KNOWLEDGE_SEARCH -> agentService.searchDevLib(content);
-                case MEMORY_SEARCH -> agentService.retrieveMemories(content, "");
-                case WEB_SEARCH -> agentService.searchWeb(content);
+                case KNOWLEDGE_SEARCH: result = agentService.searchDevLib(content); break;
+                case MEMORY_SEARCH: result = agentService.retrieveMemories(content, ""); break;
+                case WEB_SEARCH: result = agentService.searchWeb(content); break;
 
                 // ==================== 文本处理类 ====================
-                case TEXT_SUMMARY -> agentService.generateContent("text_summary", content);
-                case DATA_MASKING -> {
-                    String prompt = String.format(PromptTemplate.DATA_MASKING_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case TEXT_SUMMARY: result = agentService.generateContent("text_summary", content); break;
+                case DATA_MASKING: {
+                    String p = String.format(PromptTemplate.DATA_MASKING_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 代码转换类 ====================
-                case LANGUAGE_CONVERT -> {
-                    String prompt = String.format(PromptTemplate.CODE_LANGUAGE_CONVERT_TEMPLATE, "原语言", "目标语言", content);
-                    yield chatModel.generate(prompt);
+                case LANGUAGE_CONVERT: {
+                    String p = String.format(PromptTemplate.CODE_LANGUAGE_CONVERT_TEMPLATE, "原语言", "目标语言", content);
+                    result = chatModel.generate(p); break;
                 }
-                case FRAMEWORK_MIGRATION -> {
-                    String prompt = String.format(PromptTemplate.FRAMEWORK_MIGRATION_TEMPLATE, "原框架", "目标框架", content);
-                    yield chatModel.generate(prompt);
+                case FRAMEWORK_MIGRATION: {
+                    String p = String.format(PromptTemplate.FRAMEWORK_MIGRATION_TEMPLATE, "原框架", "目标框架", content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 业务分析类 ====================
-                case REQUIREMENT_ANALYSIS -> {
-                    String prompt = String.format(PromptTemplate.REQUIREMENT_ANALYSIS_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case REQUIREMENT_ANALYSIS: {
+                    String p = String.format(PromptTemplate.REQUIREMENT_ANALYSIS_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
-                case COMPETITIVE_ANALYSIS -> {
-                    String prompt = String.format(PromptTemplate.COMPETITIVE_ANALYSIS_TEMPLATE, content);
-                    yield chatModel.generate(prompt);
+                case COMPETITIVE_ANALYSIS: {
+                    String p = String.format(PromptTemplate.COMPETITIVE_ANALYSIS_TEMPLATE, content);
+                    result = chatModel.generate(p); break;
                 }
 
                 // ==================== 通用对话 ====================
-                case GENERAL_CHAT -> agentService.askWithContext(originalMessage, null, false, false);
+                case GENERAL_CHAT: result = agentService.askWithContext(originalMessage, null, false, false); break;
 
                 // ==================== 未知/默认 ====================
-                default -> agentService.runDevTask(originalMessage);
-            };
+                default: result = agentService.runDevTask(originalMessage); break;
+            }
+            return result;
         } catch (Exception e) {
             System.err.println("[任务分发] 执行失败: " + e.getMessage());
             return "任务执行失败: " + e.getMessage();

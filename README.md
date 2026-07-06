@@ -12,14 +12,15 @@ hybridRetrieval# Dev AI Platform
 Dev AI Platform 是一个面向开发者的 AI 辅助平台，通过自然语言与 AI 交互，实现代码生成、知识库管理、错误分析、项目搭建等全链路开发辅助能力。
 
 **核心特性：**
-- 🧠 **智能路由** — AI 自动识别用户意图，分发到对应处理 Agent
+- 🧠 **智能消息路由** — 正则+关键词快速判定消息走向：简单问题直接回答，复杂问题自动走向量库/联网搜索
+- 🔀 **多路混合检索** — BM25 关键词 + HNSW 向量 KNN 协同检索，RRF 融合排序，动态参数控制
 - 🔄 **云端/本地自动降级** — DeepSeek 断网自动切换本地 Ollama，恢复后自动切回
-- 📚 **RAG 知识检索** — 支持 PDF 文档入库、OCR 扫描版识别、向量语义检索
+- 📚 **RAG 知识检索** — 支持 PDF 文档入库、OCR 扫描版识别、三级层级分片、向量语义检索
 - 💾 **永久记忆系统** — 对话自动蒸馏为长期记忆，支持检索、归档、清理
 - 📁 **本地文件操作** — AI 直接读写本地文件、创建目录、执行脚本
 - 🏗️ **项目架构生成** — 一键生成 Spring Boot 项目结构 + CRUD 模块代码
 - 🔍 **IDEA 错误分析** — 扫描编译错误/运行时异常，AI 生成修复方案
-- 🔌 **Elasticsearch 支持** — 向量数据持久化到 ES，支持内存/ES 双模式切换
+- 🔌 **Elasticsearch 支持** — 向量数据持久化到 ES，HNSW 索引优化，支持内存/ES 双模式切换
 - 🛡️ **Agent 自愈管理** — JSON 配置驱动的健康检查、故障诊断、自动修复策略
 - 🖥️ **可视化管理面板** — 前端管理页面，实时展示 Agent 配置、自愈规则、升级策略
 
@@ -28,9 +29,13 @@ Dev AI Platform 是一个面向开发者的 AI 辅助平台，通过自然语言
 ```mermaid
 graph TD
     A["用户 (前端/API)"] --> B["DevAiController"]
+    B --> MR["MessageRouterService"]
+    MR -->|"DIRECT_CHAT"| E["DevAgentService"]
+    MR -->|"RAG/WEB/HYBRID"| OR["AgentOrchestrator"]
     B --> C["IntentAnalyzerService"]
     C --> D["TaskDispatcherService"]
-    D --> E["DevAgentService"]
+    D --> E
+    OR --> E
     E --> F["LangChain4j AiServices"]
     F --> G["FallbackChatLanguageModel"]
     G --> H["DeepSeek (云端)"]
@@ -42,7 +47,8 @@ graph TD
     J --> N["ScriptExecutorService"]
     J --> O["IdeaErrorAnalyzerService"]
     J --> P["ProjectStructureGenerator"]
-    K --> Q["VectorStoreService"]
+    K --> HR["HybridRetrievalService"]
+    HR -->|"BM25+KNN+RRF"| Q["VectorStoreService"]
     Q --> R["InMemory / Elasticsearch"]
 ```
 
@@ -84,9 +90,13 @@ dev-ai-platform/
 │   │   ├── TaskDispatcherService.java     # 任务路由分发
 │   │   ├── TaskAnalysisResult.java        # 意图分析结果模型
 │   │   ├── TaskIntent.java                # 意图类型枚举（40+种意图）
+│   │   ├── MessageRouterService.java      # 消息路由（正则+关键词快速判定走向）
+│   │   ├── MessageRouteType.java          # 路由类型枚举（DIRECT/RAG/WEB/HYBRID）
 │   │   ├── DevRagService.java             # RAG 知识检索服务
+│   │   ├── HybridRetrievalService.java    # 混合检索（BM25+HNSW KNN+RRF融合）
+│   │   ├── RetrievalParams.java           # 检索动态参数（按复杂度自动调整）
 │   │   ├── VectorStoreService.java        # 向量存储管理（内存/ES 双模式）
-│   │   ├── ElasticsearchVectorStoreService.java  # ES 向量存储实现
+│   │   ├── ElasticsearchVectorStoreService.java  # ES 向量存储实现+HNSW索引
 │   │   ├── PersistentMemoryService.java   # 永久记忆（持久化 + 检索 + 归档）
 │   │   ├── MemoryDistillationScheduler.java # 定时批量蒸馏调度器
 │   │   ├── OcrService.java               # OCR 图片文字识别
@@ -232,7 +242,29 @@ mvn spring-boot:run
 | GET  | `/api/dev-ai/agent/config` | 获取 Agent 完整配置（JSON） |
 | GET  | `/api/dev-ai/agent/config/summary` | 获取 Agent 配置摘要（状态概览） |
 
-## 🧠 智能意图路由
+## 🧠 智能消息路由
+
+### 消息路由（MessageRouterService）
+
+前端对话消息经过 **三层快速判定**，自动决定处理链路，无需前端手动开关：
+
+```
+用户消息 → 第1层：正则匹配简单问题 → DIRECT_CHAT（直接LLM回答）
+         → 第2层：关键词正则分析
+              ├─ 含"最新/版本/github" → WEB_SEARCH（联网搜索）
+              ├─ 含"代码/文档/接口"   → RAG_RETRIEVAL（向量库检索）
+              └─ 两者都有             → HYBRID（混合检索）
+         → 第3层：兜底判定（短问题直接答，技术问题走向量库）
+```
+
+| 路由类型 | 触发条件示例 | 处理方式 |
+|---|---|---|
+| `DIRECT_CHAT` | `你好`、`好的`、`哈哈哈` | 直接 LLM 回答，不检索 |
+| `RAG_RETRIEVAL` | `项目里的用户模块怎么实现？` | 走向量库 BM25+KNN 检索 |
+| `WEB_SEARCH` | `Spring Boot 3最新版本新特性？` | 联网搜索最新信息 |
+| `HYBRID` | `对比Spring Boot 3和Quarkus最新性能` | 同时走向量库+联网 |
+
+### 意图路由（IntentAnalyzerService）
 
 系统支持 **40+ 种意图**自动识别，覆盖全开发链路：
 
@@ -246,7 +278,7 @@ mvn spring-boot:run
 | 分析排查 | 错误日志分析、内存泄漏、死锁、性能排查 |
 | 架构设计 | 系统架构、API设计、微服务拆分、缓存设计 |
 | DevOps | Dockerfile优化、K8s部署 |
-| 知识检索 | 知识库检索、记忆检索 |
+| 知识检索 | 知识库检索、记忆检索、联网搜索 |
 
 ## 🔄 AI 自动降级机制
 
@@ -259,6 +291,38 @@ mvn spring-boot:run
 - 云端 API 不可用时，**自动切换**到本地 Ollama 模型
 - 每 60 秒探测云端是否恢复，恢复后**自动切回**
 - 对上层服务完全透明，无需业务代码感知
+
+## 🔀 多路混合检索
+
+### 检索架构
+
+```
+用户查询 → 动态参数分析( RetrievalParams )
+         → Embedding 向量化
+         → 并行双路检索:
+              ├─ BM25 (ES DSL match_query) → 倒排索引关键词匹配
+              └─ KNN  (ES DSL knn query)   → HNSW 向量近似搜索
+         → RRF 融合排序 (Reciprocal Rank Fusion)
+         → Top-K 结果返回
+```
+
+### 动态参数控制
+
+根据查询复杂度自动调整检索参数：
+
+| 复杂度 | topK | minScore | efSearch | fuzziness | 适用场景 |
+|---|---|---|---|---|---|
+| SIMPLE | 5 | 0.25 | 50 | 0 | 简单明确的问题 |
+| MODERATE | 8 | 0.10 | 100 | 1 | 一般技术问题 |
+| COMPLEX | 12 | 0.0 | 200 | 1 | 复杂/模糊的查询 |
+
+### HNSW 索引参数
+
+```properties
+retrieval.hnsw.m=16              # 每个节点的最大连接数
+retrieval.hnsw.ef-construction=128  # 构建时的搜索宽度
+retrieval.hnsw.dims=768          # 向量维度（nomic-embed-text）
+```
 
 ## ⚙️ 配置说明
 
@@ -286,6 +350,11 @@ llm.fallback.health-check-interval-seconds=60
 vector.store.type=memory
 elasticsearch.url=http://127.0.0.1:9200
 elasticsearch.index-name=dev-ai-vectors
+
+# HNSW 向量索引参数
+retrieval.hnsw.m=16
+retrieval.hnsw.ef-construction=128
+retrieval.hnsw.dims=768
 
 # 文件操作安全（路径白名单）
 file.allowed-paths=D:\\dev,E:

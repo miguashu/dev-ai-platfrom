@@ -469,11 +469,8 @@ public class DevAiController {
 
         // ========== 【智能路由】自动判断是否需要走向量库/联网搜索 ==========
         MessageRouteType routeType = messageRouterService.route(taskContent);
-        // 用路由结果覆盖前端传入的开关（路由服务自动判定优先）
-        final boolean ragEnabled = routeType.isEnableRag();
-        final boolean webSearchEnabled = routeType.isEnableWebSearch();
         System.out.println("[智能路由] 消息路由结果: " + routeType.getDisplayName()
-                + " → enableRag=" + ragEnabled + ", enableWebSearch=" + webSearchEnabled);
+                + " → enableRag=" + routeType.isEnableRag() + ", enableWebSearch=" + routeType.isEnableWebSearch());
 
         String prompt = "历史上下文：\n" + context + "\n\n当前任务：" + taskContent;
 
@@ -494,8 +491,16 @@ public class DevAiController {
                 // 在当前线程设置进度回调（ThreadLocal是线程隔离的）
                 DevAgentService.setProgressCallback((type, message) -> safeSend.accept(type, message));
 
-                // 将开关传递给编排器
-                String result = orchestrator.orchestrate(prompt, ragEnabled, webSearchEnabled);
+                String result;
+                if (routeType == MessageRouteType.DIRECT_CHAT) {
+                    // 【DIRECT_CHAT】简单问题直接调LLM，跳过编排器和工具链
+                    result = orchestrator.directChat(taskContent);
+                } else {
+                    // 【复杂问题】走完整的多Agent编排流程
+                    final boolean ragEnabled = routeType.isEnableRag();
+                    final boolean webSearchEnabled = routeType.isEnableWebSearch();
+                    result = orchestrator.orchestrate(prompt, ragEnabled, webSearchEnabled);
+                }
                 safeSend.accept("result", result);
                 if (!emitterDone.get()) {
                     emitter.complete();
@@ -530,7 +535,18 @@ public class DevAiController {
                                          @RequestParam(required = false) String contextHistory,
                                          @RequestParam(required = false, defaultValue = "false") boolean enableRag,
                                          @RequestParam(required = false, defaultValue = "false") boolean enableWebSearch) {
-        return Result.success(agentService.askWithContext(question, contextHistory, enableRag, enableWebSearch));
+        // 【智能路由】自动判定路由，覆盖前端手动开关
+        MessageRouteType routeType = messageRouterService.route(question);
+        boolean finalRag = routeType.isEnableRag();
+        boolean finalWebSearch = routeType.isEnableWebSearch();
+        System.out.println("[chat/ask 智能路由] " + routeType.getDisplayName()
+                + " → rag=" + finalRag + ", webSearch=" + finalWebSearch);
+
+        // DIRECT_CHAT 简单问题直接回答，不走检索
+        if (routeType == MessageRouteType.DIRECT_CHAT) {
+            return Result.success(agentService.askWithContext(question, contextHistory, false, false));
+        }
+        return Result.success(agentService.askWithContext(question, contextHistory, finalRag, finalWebSearch));
     }
 
     /* 8. SQL性能优化分析
