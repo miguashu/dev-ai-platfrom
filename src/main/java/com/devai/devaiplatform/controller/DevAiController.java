@@ -8,6 +8,10 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -39,7 +43,9 @@ public class DevAiController {
     private final TaskDispatcherService taskDispatcherService;  // 【新增】任务分发服务
     private final IdeaErrorAnalyzerService ideaErrorAnalyzerService;  // 【新增】IDEA错误分析服务
     private final ChatHistoryService chatHistoryService;  // 【新增】聊天历史服务
+    private final AgentOrchestrator orchestrator;  // 多Agent编排器
     private final AgentConfigService agentConfigService;  // 【新增】Agent配置服务
+    private final MessageRouterService messageRouterService;  // 【新增】消息路由服务
 
     // 【新增】文件上传安全配置
     @Value("${file.upload.max-size:52428800}") // 默认50MB
@@ -75,17 +81,21 @@ public class DevAiController {
                            TaskDispatcherService taskDispatcherService,
                            IdeaErrorAnalyzerService ideaErrorAnalyzerService,
                            ChatHistoryService chatHistoryService,
-                           AgentConfigService agentConfigService) {
+                           AgentConfigService agentConfigService,
+                           AgentOrchestrator orchestrator,
+                           MessageRouterService messageRouterService) {
         this.ragService = ragService;
         this.agentService = agentService;
-        this.ocrService = ocrService;  // 【新增】初始化
+        this.ocrService = ocrService;
         this.memoryService = new PersistentMemoryService();
-        this.distillationScheduler = distillationScheduler;  // 【新增】初始化
-        this.intentAnalyzerService = intentAnalyzerService;  // 【新增】初始化
-        this.taskDispatcherService = taskDispatcherService;  // 【新增】初始化
-        this.ideaErrorAnalyzerService = ideaErrorAnalyzerService;  // 【新增】初始化
-        this.chatHistoryService = chatHistoryService;  // 【新增】初始化
-        this.agentConfigService = agentConfigService;  // 【新增】初始化
+        this.distillationScheduler = distillationScheduler;
+        this.intentAnalyzerService = intentAnalyzerService;
+        this.taskDispatcherService = taskDispatcherService;
+        this.ideaErrorAnalyzerService = ideaErrorAnalyzerService;
+        this.chatHistoryService = chatHistoryService;
+        this.agentConfigService = agentConfigService;
+        this.orchestrator = orchestrator;
+        this.messageRouterService = messageRouterService;
     }
 
     // ==================== 智能路由分发 ====================
@@ -370,6 +380,47 @@ public class DevAiController {
     // ==================== Agent智能任务执行 ====================
 
     /**
+     * 【SSE流式】Agent任务执行，实时推送进度给前端
+     * 用EventSource监听: /api/dev-ai/agent/stream?task=xxx
+     */
+    @GetMapping("/agent/stream")
+    public SseEmitter agentRunStream(@RequestParam String task) {
+        SseEmitter emitter = new SseEmitter(600_000L); // 10分钟超时
+
+        DevAgentService.setProgressCallback((type, message) -> {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name(type)
+                        .data(message));
+            } catch (Exception e) {
+                // 客户端断开连接，忽略
+            }
+        });
+
+        // 异步执行任务，避免阻塞SSE连接
+        new Thread(() -> {
+            try {
+                String result = agentService.runDevTask(task);
+                emitter.send(SseEmitter.event()
+                        .name("result")
+                        .data(result));
+                emitter.complete();
+            } catch (Exception e) {
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("error")
+                            .data("执行失败: " + e.getMessage()));
+                } catch (Exception ignored) {}
+                emitter.completeWithError(e);
+            } finally {
+                DevAgentService.clearProgressCallback();
+            }
+        }).start();
+
+        return emitter;
+    }
+
+    /**
      * 3. Agent综合任务入口，覆盖编码、需求、测试、文档、运维全链路
      * 示例：
      * - "帮我查找用户管理模块的代码"
@@ -397,13 +448,71 @@ public class DevAiController {
     /**
      * 多轮对话带上下文的任务处理（支持多轮对话，Agent调度工具）
      */
-    @PostMapping("/agent/context-run")
-    public Result<String> runTaskWithContext(@RequestParam String taskContent, @RequestParam String context) {
-        String prompt = "历史上下文：\n" + context + "\n\n当前任务：" + taskContent;
-        // 1. AI分析意图（理解、拆分、提取）
-        TaskAnalysisResult analysis = intentAnalyzerService.analyze(prompt);
+    /**
+     * 【SSE流式】多轮对话带上下文的任务处理，实时推送进度给前端
+     * 使用 SseEmitter 正确处理异步SSE，避免void+PrintWriter在异步线程中响应被关闭的问题
+     */
+    @PostMapping(value = "/agent/context-run", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter runTaskWithContext(@RequestBody Map<String, String> body) {
+        // 超时设为5分钟
+        SseEmitter emitter = new SseEmitter(300_000L);
+        // 跟踪emitter是否已完成（客户端断开/超时/出错都会导致emitter提前完成）
+        AtomicBoolean emitterDone = new AtomicBoolean(false);
+        emitter.onCompletion(() -> emitterDone.set(true));
+        emitter.onTimeout(() -> emitterDone.set(true));
+        emitter.onError(e -> emitterDone.set(true));
 
-        return Result.success(agentService.runTaskWithContext(analysis));
+        String taskContent = body.getOrDefault("taskContent", "");
+        String context = body.getOrDefault("context", "");
+        boolean enableRag = Boolean.parseBoolean(body.getOrDefault("enableRag", "false"));
+        boolean enableWebSearch = Boolean.parseBoolean(body.getOrDefault("enableWebSearch", "false"));
+
+        // ========== 【智能路由】自动判断是否需要走向量库/联网搜索 ==========
+        MessageRouteType routeType = messageRouterService.route(taskContent);
+        // 用路由结果覆盖前端传入的开关（路由服务自动判定优先）
+        final boolean ragEnabled = routeType.isEnableRag();
+        final boolean webSearchEnabled = routeType.isEnableWebSearch();
+        System.out.println("[智能路由] 消息路由结果: " + routeType.getDisplayName()
+                + " → enableRag=" + ragEnabled + ", enableWebSearch=" + webSearchEnabled);
+
+        String prompt = "历史上下文：\n" + context + "\n\n当前任务：" + taskContent;
+
+        // 安全发送：检查emitter是否已完成
+        java.util.function.BiConsumer<String, String> safeSend = (eventType, data) -> {
+            if (!emitterDone.get()) {
+                try {
+                    emitter.send(SseEmitter.event().name(eventType).data(data));
+                } catch (Exception e) {
+                    emitterDone.set(true); // 发送失败说明emitter已不可用
+                }
+            }
+        };
+
+        // 在新线程中设置ThreadLocal回调 + 执行任务
+        new Thread(() -> {
+            try {
+                // 在当前线程设置进度回调（ThreadLocal是线程隔离的）
+                DevAgentService.setProgressCallback((type, message) -> safeSend.accept(type, message));
+
+                // 将开关传递给编排器
+                String result = orchestrator.orchestrate(prompt, ragEnabled, webSearchEnabled);
+                safeSend.accept("result", result);
+                if (!emitterDone.get()) {
+                    emitter.complete();
+                }
+            } catch (Exception e) {
+                System.err.println("[SSE] 执行失败: " + e.getMessage());
+                e.printStackTrace();
+                safeSend.accept("error", "执行失败: " + e.getMessage());
+                if (!emitterDone.get()) {
+                    try { emitter.complete(); } catch (Exception ignored) {}
+                }
+            } finally {
+                DevAgentService.clearProgressCallback();
+            }
+        }).start();
+
+        return emitter;
     }
 
     /**
@@ -430,7 +539,7 @@ public class DevAiController {
      */
     @PostMapping("/sql/optimize")
     public Result<String> optimizeSql(@RequestParam String sql) {
-        return Result.success(agentService.optimizeSql(sql));
+        return Result.success(agentService.generateContent("sql_optimize", sql));
     }
 
     /**
@@ -443,7 +552,7 @@ public class DevAiController {
     public Result<String> designIndex(
             @RequestParam String tableSchema,
             @RequestParam String queryPatterns) {
-        return Result.success(agentService.designIndex(tableSchema, queryPatterns));
+        return Result.success(agentService.generateContent("sql_design", tableSchema + "\n查询模式:" + queryPatterns));
     }
 
     /**
@@ -453,7 +562,7 @@ public class DevAiController {
      */
     @PostMapping("/sql/rewrite")
     public Result<String> rewriteSql(@RequestParam String sql) {
-        return Result.success(agentService.rewriteSql(sql));
+        return Result.success(agentService.generateContent("sql_rewrite", sql));
     }
 
     /**
@@ -463,7 +572,7 @@ public class DevAiController {
      */
     @PostMapping("/sql/explain-analysis")
     public Result<String> analyzeExplainPlan(@RequestParam String explainOutput) {
-        return Result.success(agentService.analyzeExplainPlan(explainOutput));
+        return Result.success(agentService.generateContent("explain_analysis", explainOutput));
     }
 
     /**
@@ -473,7 +582,7 @@ public class DevAiController {
      */
     @PostMapping("/sql/design-schema")
     public Result<String> designTableSchema(@RequestParam String requirement) {
-        return Result.success(agentService.designTableSchema(requirement));
+        return Result.success(agentService.generateContent("table_design", requirement));
     }
 
     // ... existing code ...

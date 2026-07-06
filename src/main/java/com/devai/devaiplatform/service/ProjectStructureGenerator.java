@@ -20,20 +20,34 @@ public class ProjectStructureGenerator {
     /**
      * 生成 Spring Boot 标准项目结构
      *
-     * @param projectPath 项目根路径
-     * @param projectName 项目名称
+     * @param projectPath 项目父目录（不包含项目名），例如：E:\\projects
+     * @param projectName 项目名称，例如：myapp
      * @param packageName 包名（如 com.example.demo）
      * @return 生成结果
      */
     public GenerateResult generateSpringBootProject(String projectPath, String projectName, String packageName) {
         GenerateResult result = new GenerateResult();
         result.projectName = projectName;
-        result.projectPath = projectPath;
-
+        
+        // 【关键修复】规范化路径处理
+        // 移除末尾的路径分隔符
+        String normalizedPath = projectPath.replaceAll("[/\\\\]+$", "");
+        
+        // 如果传入的路径已经包含项目名（即以项目名结尾），则提取父目录
+        if (normalizedPath.endsWith("/" + projectName) || normalizedPath.endsWith("\\" + projectName)) {
+            int lastSepIndex = Math.max(normalizedPath.lastIndexOf('/'), normalizedPath.lastIndexOf('\\'));
+            if (lastSepIndex > 0) {
+                normalizedPath = normalizedPath.substring(0, lastSepIndex);
+            }
+        }
+        
+        result.projectPath = normalizedPath;
         String packagePath = packageName.replace(".", "/");
-        String basePath = projectPath + "/" + projectName;
+        String basePath = normalizedPath + "/" + projectName;
 
         System.out.println("[架构生成] 开始生成 Spring Boot 项目: " + projectName);
+        System.out.println("[架构生成] 项目父目录: " + normalizedPath);
+        System.out.println("[架构生成] 完整项目路径: " + basePath);
 
         try {
             // 1. 创建目录结构
@@ -154,6 +168,10 @@ public class ProjectStructureGenerator {
 
     /**
      * 生成 Controller-Service-Repository 三层架构代码
+     * @param projectPath 项目根路径（可以是项目目录本身或父目录）
+     * @param packageName 包名
+     * @param entityName 实体名称
+     * @param moduleName 模块名称
      */
     public GenerateResult generateLayeredCode(String projectPath, String packageName, 
                                                String entityName, String moduleName) {
@@ -162,10 +180,22 @@ public class ProjectStructureGenerator {
         result.projectPath = projectPath;
 
         String packagePath = packageName.replace(".", "/");
-        String basePath = projectPath;
+        // 【关键修复】检测 projectPath 是否已经是项目目录（包含 src 子目录）
+        String basePath;
+        if (projectPath.endsWith("/src") || projectPath.endsWith("\\src")) {
+            // 如果传入的是 xxx/src，则去掉 /src
+            basePath = projectPath.substring(0, projectPath.length() - 4);
+        } else if (projectPath.contains("/src/") || projectPath.contains("\\src\\")) {
+            // 如果传入的是 xxx/src/main/java，则取到项目根目录
+            int srcIndex = Math.max(projectPath.indexOf("/src/"), projectPath.indexOf("\\src\\"));
+            basePath = projectPath.substring(0, srcIndex);
+        } else {
+            // 否则直接使用传入的路径作为项目根目录
+            basePath = projectPath;
+        }
         String entityLower = entityName.toLowerCase();
 
-        System.out.println("[架构生成] 开始生成 " + entityName + " 模块代码");
+        System.out.println("[架构生成] 开始生成 " + entityName + " 模块代码，项目根路径: " + basePath);
 
         try {
             Map<String, String> files = new LinkedHashMap<>();

@@ -66,39 +66,39 @@ public class TaskDispatcherService {
         try {
             return switch (intent) {
                 // ==================== 代码生成类 ====================
-                case BACKEND_CODE_GEN -> agentService.generateBackendCode(content);
-                case FRONTEND_CODE_GEN -> agentService.generateFrontendCode(content);
-                case CRUD_CODE_GEN -> agentService.genCrudCode(content);
-                case API_CALL_GEN -> agentService.generateApiCallCode(content);
-                case VALIDATION_CODE_GEN -> agentService.generateValidationCode(content);
-                case MIGRATION_SCRIPT_GEN -> agentService.generateMigrationScript(content);
-                case CONFIG_FILE_GEN -> agentService.generateConfigFile("通用配置", content);
+                case BACKEND_CODE_GEN -> agentService.generateContent("backend_code", content);
+                case FRONTEND_CODE_GEN -> agentService.generateContent("frontend_code", content);
+                case CRUD_CODE_GEN -> agentService.generateContent("crud_sql", content);
+                case API_CALL_GEN -> agentService.generateContent("api_call_code", content);
+                case VALIDATION_CODE_GEN -> agentService.generateContent("validation_code", content);
+                case MIGRATION_SCRIPT_GEN -> agentService.generateContent("migration_script", content);
+                case CONFIG_FILE_GEN -> agentService.generateContent("config_file", "通用配置\n" + content);
 
                 // ==================== 测试类 ====================
-                case UNIT_TEST_GEN -> agentService.generateUnitTest(content);
+                case UNIT_TEST_GEN -> agentService.generateContent("unit_test", content);
                 case INTEGRATION_TEST_GEN -> {
                     String prompt = String.format(PromptTemplate.INTEGRATION_TEST_TEMPLATE, content);
                     yield chatModel.generate(prompt);
                 }
 
                 // ==================== 代码审查类 ====================
-                case CODE_REVIEW -> agentService.codeReview(content);
-                case CODE_REFACTOR -> agentService.suggestCodeRefactoring(content);
+                case CODE_REVIEW -> agentService.generateContent("code_review", content);
+                case CODE_REFACTOR -> agentService.generateContent("refactoring", content);
                 case CODE_COMMENT -> {
                     String prompt = String.format(PromptTemplate.CODE_COMMENT_TEMPLATE, content);
                     yield chatModel.generate(prompt);
                 }
 
                 // ==================== SQL/数据库类 ====================
-                case SQL_OPTIMIZE -> agentService.optimizeSql(content);
-                case SQL_REWRITE -> agentService.rewriteSql(content);
-                case INDEX_DESIGN -> agentService.designIndex(content, "常见查询模式");
-                case EXPLAIN_ANALYSIS -> agentService.analyzeExplainPlan(content);
-                case TABLE_SCHEMA_DESIGN -> agentService.designTableSchema(content);
+                case SQL_OPTIMIZE -> agentService.generateContent("sql_optimize", content);
+                case SQL_REWRITE -> agentService.generateContent("sql_rewrite", content);
+                case INDEX_DESIGN -> agentService.generateContent("sql_design", content);
+                case EXPLAIN_ANALYSIS -> agentService.generateContent("explain_analysis", content);
+                case TABLE_SCHEMA_DESIGN -> agentService.generateContent("table_design", content);
 
                 // ==================== 文档生成类 ====================
-                case API_DOC_GEN -> agentService.genApiDoc(content);
-                case PRD_DOC_GEN -> agentService.genPrdDoc(content);
+                case API_DOC_GEN -> agentService.generateContent("api_doc", content);
+                case PRD_DOC_GEN -> agentService.generateContent("prd_doc", content);
                 case TECH_SOLUTION_DOC -> {
                     String prompt = String.format(PromptTemplate.TECH_SOLUTION_DOC_TEMPLATE, content);
                     yield chatModel.generate(prompt);
@@ -171,7 +171,7 @@ public class TaskDispatcherService {
                 case WEB_SEARCH -> agentService.searchWeb(content);
 
                 // ==================== 文本处理类 ====================
-                case TEXT_SUMMARY -> agentService.generateTextSummary(content, "请精炼总结");
+                case TEXT_SUMMARY -> agentService.generateContent("text_summary", content);
                 case DATA_MASKING -> {
                     String prompt = String.format(PromptTemplate.DATA_MASKING_TEMPLATE, content);
                     yield chatModel.generate(prompt);

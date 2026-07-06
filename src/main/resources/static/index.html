@@ -379,6 +379,22 @@
             transform: none;
         }
 
+        .read-file-btn {
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+            transition: transform 0.2s;
+        }
+
+        .read-file-btn:hover {
+            transform: scale(1.05);
+        }
+
         .loading {
             display: inline-block;
             width: 20px;
@@ -721,9 +737,14 @@
                     ></textarea>
                 </div>
                 <!-- 发送按钮 -->
-                <button class="send-btn" id="sendBtn" onclick="sendMessage()">
-                    发送 ➤
-                </button>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                        发送 ➤
+                    </button>
+                    <button class="read-file-btn" id="readFileBtn" onclick="readFileToInput()" title="读取本地文件内容到输入框">
+                        📁 读取文件
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -1017,6 +1038,202 @@
             }
         }
 
+        // SSE流式请求 - 解析SSE流并逐事件回调
+        async function fetchSSE(url, onEvent, options) {
+            const fetchOpts = options || {};
+            if (!fetchOpts.method) fetchOpts.method = 'GET';
+            const response = await fetch(url, fetchOpts);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const contentType = response.headers.get('Content-Type') || '';
+            // 如果不是 SSE，回退到 JSON 解析
+            if (!contentType.includes('text/event-stream')) {
+                const json = await response.json();
+                if (json.code === 200) return json.data;
+                throw new Error(json.message || '请求失败');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let finalResultParts = null;  // 用数组累积多行data
+            let toolCount = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                // SSE事件以双换行分隔
+                const events = buffer.split('\n\n');
+                buffer = events.pop() || '';  // 最后一个可能不完整，保留在buffer
+
+                for (const eventBlock of events) {
+                    if (!eventBlock.trim()) continue;
+                    const lines = eventBlock.split('\n');
+                    let eventType = '';
+                    let dataParts = [];
+
+                    for (const line of lines) {
+                        if (line.startsWith('event:')) {
+                            eventType = line.substring(6).trim();
+                        } else if (line.startsWith('data:')) {
+                            dataParts.push(line.substring(5));
+                        }
+                    }
+
+                    if (dataParts.length === 0) continue;
+                    // SSE规范：多行data用换行符连接
+                    const fullData = dataParts.join('\n');
+
+                    if (eventType === 'result') {
+                        if (finalResultParts === null) finalResultParts = [];
+                        finalResultParts.push(fullData);
+                    } else if (eventType) {
+                        onEvent(eventType, fullData);
+                        if (eventType === 'tool') toolCount++;
+                    }
+                }
+            }
+            return finalResultParts !== null ? finalResultParts.join('\n') : null;
+        }
+
+        // 创建直播日志容器（实时显示Agent执行步骤）
+        function addLiveLog() {
+            const chatMessages = document.getElementById('chatMessages');
+            const logDiv = document.createElement('div');
+            logDiv.className = 'message ai';
+            logDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div style="flex:1;">
+                    <div class="live-log-header" style="font-size:14px;font-weight:bold;color:#667eea;margin-bottom:6px;">📡 实时执行中...</div>
+                    <div class="live-log-content" style="background:#f8f9fa;border-radius:8px;padding:10px 14px;max-height:300px;overflow-y:auto;font-family:Consolas,monospace;font-size:13px;line-height:1.6;"></div>
+                </div>
+            `;
+            chatMessages.appendChild(logDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return logDiv;
+        }
+
+        // 创建进度消息容器（显示在聊天区）
+        function addProgressMessage() {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message ai';
+            messageDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div style="flex:1;">
+                    <div class="progress-text" style="font-size:14px;color:#666;margin-bottom:8px;">⏳ 正在处理...</div>
+                    <div class="progress-bar" style="background:#e0e0e0;border-radius:4px;height:4px;overflow:hidden;">
+                        <div class="progress-bar-inner" style="width:10%;height:100%;background:linear-gradient(135deg,#667eea,#764ba2);border-radius:4px;transition:width 0.3s;"></div>
+                    </div>
+                </div>
+            `;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return messageDiv;
+        }
+
+        // 全局累计工具调用数跨轮追踪
+        let totalToolCalls = 0;
+        let lastToolLimitHit = false;
+
+        // 带操作按钮的消息
+        function addMessageWithActions(role, content, actions) {
+            const chatMessages = document.getElementById('chatMessages');
+            const id = 'msg-' + Date.now();
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${role}`;
+            msgDiv.id = id;
+            const avatar = role === 'ai' ? '🤖' : '👤';
+            const time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+            const btnHTML = actions.map((a, i) =>
+                `<button class="action-btn ${a.cls}" style="margin-right:8px;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:13px;${a.cls.includes('continue')?'background:#667eea;color:white;':'background:#e0e0e0;color:#333;'}" data-action="${i}">${a.text}</button>`
+            ).join('');
+
+            msgDiv.innerHTML = `
+                <div class="message-avatar">${avatar}</div>
+                <div style="flex:1;">
+                    <div class="message-content">${content}</div>
+                    <div class="action-row" style="margin-top:12px;">${btnHTML}</div>
+                    <div class="message-time">${time}</div>
+                </div>
+            `;
+
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            chatHistory.push({ role, content, time });
+            chatCounter++;
+            document.getElementById('chatCount').textContent = chatCounter;
+
+            // 绑定按钮事件
+            msgDiv.querySelectorAll('.action-btn').forEach(btn => {
+                btn.onclick = function() {
+                    const idx = parseInt(this.dataset.action);
+                    // 禁用所有按钮
+                    msgDiv.querySelectorAll('.action-btn').forEach(b => b.disabled = true);
+                    this.textContent = '⏳ 处理中...';
+                    actions[idx].action();
+                };
+            });
+
+            return id;
+        }
+
+        // 继续 Agent 任务
+        async function continueAgent(originalQuestion, prevContext, wasInterrupted) {
+            const resumePrompt = wasInterrupted 
+                ? '【系统提示】上一轮因工具调用达到50次上限被中断，部分工作可能未完成。请检查上一轮的结果，直接从断点处继续执行，完成所有未完成的部分。'
+                : '请继续完成上面的任务，把所有未完成的工作补充完整。';
+            // 使用JSON body发送，避免大文本URL编码导致400错误
+            const agentPayload = JSON.stringify({ 
+                taskContent: resumePrompt, 
+                context: prevContext,
+                enableRag: ragEnabled,
+                enableWebSearch: webSearchEnabled
+            });
+
+            const progressDiv = addProgressMessage();
+            const progressText = progressDiv.querySelector('.progress-text');
+            const progressBar = progressDiv.querySelector('.progress-bar-inner');
+            let stepCount = 0;
+            let hitLimit = false;
+
+            const result = await fetchSSE(`${API_BASE}/agent/context-run`, (type, data) => {
+                stepCount++;
+                totalToolCalls++;
+                if (type === 'warn' && data.includes('达到上限')) hitLimit = true;
+                progressBar.style.width = Math.min(10 + stepCount * 8, hitLimit ? 100 : 85) + '%';
+                switch(type) {
+                    case 'start': progressText.textContent = '🚀 ' + data; break;
+                    case 'tool':  progressText.textContent = '🔧 ' + data; break;
+                    case 'info':  progressText.textContent = 'ℹ️ ' + data; break;
+                    case 'warn':  progressText.textContent = '⚠️ ' + data; break;
+                    case 'done':
+                        progressBar.style.width = '95%';
+                        progressText.textContent = '✅ ' + data + '，整理中...';
+                        break;
+                }
+            }, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: agentPayload
+            });
+
+            progressDiv.remove();
+            if (result) {
+                addMessageWithActions('ai', 
+                    (hitLimit ? '<div style="background:#fff3cd;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;">⚠️ 本轮已用尽50次工具额度，结果可能不完整</div>' : '') + formatResponse(result), [
+                    { text: '✅ 已完成', cls: '', action: () => {} },
+                    { text: hitLimit ? '🔄 继续执行（新一轮配额）' : '🔄 继续优化', cls: 'continue-btn', action: () => continueAgent(originalQuestion, prevContext + '\nAI：' + result, hitLimit) }
+                ]);
+            } else {
+                addMessage('ai', '❌ 继续执行失败：未收到结果');
+            }
+            saveCurrentSession();
+        }
+
         // 添加消息到聊天区
         function addMessage(role, content) {
             const chatMessages = document.getElementById('chatMessages');
@@ -1046,6 +1263,41 @@
             document.getElementById('chatCount').textContent = chatCounter;
         }
 
+        // 读取文件内容到输入框
+        async function readFileToInput() {
+            const filePath = prompt('请输入要读取的文件路径：');
+            if (!filePath || !filePath.trim()) return;
+
+            const readBtn = document.getElementById('readFileBtn');
+            readBtn.disabled = true;
+            readBtn.textContent = '⏳ 读取中...';
+
+            try {
+                const resp = await fetch(`${API_BASE}/file/read`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `filePath=${encodeURIComponent(filePath.trim())}`
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const json = await resp.json();
+                const content = json.code === 200 ? json.data : null;
+                if (content) {
+                    const input = document.getElementById('messageInput');
+                    input.value = `文件内容 (${filePath}):\n\n${content}\n\n---\n`;
+                    input.focus();
+                    addMessage('ai', `✅ 已读取文件：${filePath}（${content.length} 字符）`);
+                } else {
+                    addMessage('ai', `❌ 读取失败：${json.message || '未知错误'}`);
+                }
+            } catch (error) {
+                console.error('读取文件失败:', error);
+                addMessage('ai', `❌ 读取文件失败: ${error.message}`);
+            } finally {
+                readBtn.disabled = false;
+                readBtn.textContent = '📁 读取文件';
+            }
+        }
+
         // 发送消息
         async function sendMessage() {
             const input = document.getElementById('messageInput');
@@ -1073,39 +1325,70 @@
                 let result;
 
                 if (currentMode === 'agent') {
-                    // ===== Agent模式：调用 /agent/context-run，使用AiServices + 工具 =====
-                    const agentBody = `taskContent=${encodeURIComponent(question)}&context=${encodeURIComponent(context)}`;
-                    const agentResp = await fetch(`${API_BASE}/agent/context-run`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: agentBody
+                    // ===== Agent模式：SSE流式，实时直播执行过程 =====
+                    // 使用JSON body发送，避免大文本URL编码导致400错误
+                    const agentPayload = JSON.stringify({ 
+                        taskContent: question, 
+                        context: context,
+                        enableRag: ragEnabled,
+                        enableWebSearch: webSearchEnabled
                     });
-                    if (!agentResp.ok) throw new Error(`HTTP error! status: ${agentResp.status}`);
-                    result = await agentResp.json();
-                } else {
-                    // ===== 智能问答模式：调用 /chat/ask，轻量直接对话 =====
-                    let body = `question=${encodeURIComponent(question)}&contextHistory=${encodeURIComponent(context)}`;
-                    if (ragEnabled) {
-                        body += '&enableRag=true';
-                    }
-                    if (webSearchEnabled) {
-                        body += '&enableWebSearch=true';
-                    }
-                    const response = await fetch(`${API_BASE}/chat/ask`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: body
-                    });
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    result = await response.json();
-                }
 
-                // 判断Result包装类的返回状态
-                if (result.code !== 200) {
-                    addMessage('ai', `❌ 请求失败: ${result.message}`);
+                    // 创建直播日志容器
+                    const logDiv = addLiveLog();
+                    const logContent = logDiv.querySelector('.live-log-content');
+
+                    let hitLimit = false;
+                    result = await fetchSSE(`${API_BASE}/agent/context-run`, (type, data) => {
+                        if (type === 'warn' && data.includes('上限')) hitLimit = true;
+                        const icon = { 'start':'🚀', 'tool':'  🔧', 'info':'  ℹ️', 'warn':'  ⚠️', 'done':'✅' }[type] || '';
+                        const line = document.createElement('div');
+                        line.style.cssText = 'padding:2px 0;font-size:13px;' + (type==='start'?'font-weight:bold;color:#667eea;':'') + (type==='done'?'font-weight:bold;color:#28a745;':'color:#555;');
+                        line.textContent = icon + ' ' + data;
+                        logContent.appendChild(line);
+                        logDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                    }, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: agentPayload
+                    });
+
+                    // 移除直播日志，保留结果
+                    if (logDiv.querySelector('.live-log-content').children.length <= 2) {
+                        logDiv.remove(); // 没任何执行步骤就直接显示结果
+                    } else {
+                        // 保留日志但折叠
+                        logDiv.querySelector('.live-log-header').textContent = '📋 执行完毕';
+                    }
+
+                    lastToolLimitHit = hitLimit;
+                    if (result) {
+                        addMessageWithActions('ai', 
+                            (hitLimit ? '<div style="background:#fff3cd;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;">⚠️ 本轮已用尽50次工具额度，结果可能不完整</div>' : '') + formatResponse(result), [
+                            { text: '✅ 已完成', cls: '', action: () => {} },
+                            { text: hitLimit ? '🔄 继续执行（新一轮配额）' : '🔄 继续优化', cls: 'continue-btn', action: () => continueAgent(question, context + '\nAI：' + result, hitLimit) }
+                        ]);
+                    } else {
+                        addMessage('ai', '❌ 请求失败：未收到结果');
+                    }
+                    return;
                 } else {
-                    // 显示AI回复（result.data 是真正的返回数据）
-                    addMessage('ai', formatResponse(result.data));
+                    // ===== 智能问答模式（POST JSON）=====
+                    const qaBody = new URLSearchParams();
+                    qaBody.append('question', question);
+                    qaBody.append('contextHistory', context);
+                    if (ragEnabled) qaBody.append('enableRag', 'true');
+                    if (webSearchEnabled) qaBody.append('enableWebSearch', 'true');
+                    const resp = await fetch(`${API_BASE}/chat/ask`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: qaBody.toString()
+                    });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const json = await resp.json();
+                    result = json.code === 200 ? json.data : null;
+                    addMessage('ai', result ? formatResponse(result) : `❌ ${json.message || '请求失败'}`);
+                    return;
                 }
 
             } catch (error) {

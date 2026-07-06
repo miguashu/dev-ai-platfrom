@@ -43,6 +43,7 @@ public class DevRagService {
     private final ChatLanguageModel chatModel;
     private final EmbeddingModel embeddingModel;
     private final VectorStoreService vectorStoreService;
+    private final HybridRetrievalService hybridRetrievalService;
     private final DevAssistant assistant;
     private final DocumentParser pdfParser;
     private final OcrService ocrService;
@@ -64,11 +65,13 @@ public class DevRagService {
     public DevRagService(ChatLanguageModel chatModel,
                          EmbeddingModel embeddingModel,
                          VectorStoreService vectorStoreService,
+                         HybridRetrievalService hybridRetrievalService,
                          OcrService ocrService,
                          PdfDataExtractor pdfDataExtractor) {
         this.chatModel = chatModel;
         this.embeddingModel = embeddingModel;
         this.vectorStoreService = vectorStoreService;
+        this.hybridRetrievalService = hybridRetrievalService;
         this.ocrService = ocrService;
         this.pdfDataExtractor = pdfDataExtractor;
         this.pdfParser = new ApachePdfBoxDocumentParser();
@@ -440,97 +443,11 @@ public class DevRagService {
         return sb.toString();
     }
     /**
-     * 【混合检索核心实现】
-     * 结合向量检索 + BM25关键词检索 + 层级检索
+     * 【混合检索核心】委托给 HybridRetrievalService
+     * BM25 + HNSW KNN + RRF 融合排序 + 动态参数控制
      */
     private List<Content> hybridRetrieval(String userQuestion) {
-        Query query = Query.from(userQuestion);
-        
-        // 策略1：向量语义检索（从三个层级分别检索）
-        System.out.println("\n【策略1】向量语义检索...");
-        List<Content> vectorResults = vectorSemanticRetrieval(query);
-        System.out.println("  检索到 " + vectorResults.size() + " 条");
-        
-        // 策略2：关键词BM25检索（精确匹配）
-        System.out.println("\n【策略2】关键词BM25检索...");
-        List<Content> keywordResults = keywordBM25Retrieval(query);
-        System.out.println("  检索到 " + keywordResults.size() + " 条");
-        
-        // 融合排序：去重 + 加权排序
-        System.out.println("\n【融合】合并多路检索结果...");
-        List<Content> mergedResults = mergeAndRankResults(vectorResults, keywordResults);
-        
-        return mergedResults;
-    }
-
-    /**
-     * 向量语义检索（分层级检索后合并）
-     */
-    private List<Content> vectorSemanticRetrieval(Query query) {
-        try {
-            ContentRetriever normalRetriever = EmbeddingStoreContentRetriever.builder()
-                    .embeddingStore(vectorStoreService.getEmbeddingStore())
-                    .embeddingModel(embeddingModel)
-                    .maxResults(8)
-                    .minScore(0.0)
-                    .build();
-            
-            return normalRetriever.retrieve(query);
-        } catch (Exception e) {
-            System.out.println("[向量检索] 检索异常（索引可能尚未创建，请先上传文档入库）: " + e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    /**
-     * 关键词BM25检索（基于文本相似度）
-     * 注意：LangChain4j原生不支持BM25，这里使用简化的关键词匹配模拟
-     */
-    private List<Content> keywordBM25Retrieval(Query query) {
-        try {
-            ContentRetriever preciseRetriever = EmbeddingStoreContentRetriever.builder()
-                    .embeddingStore(vectorStoreService.getEmbeddingStore())
-                    .embeddingModel(embeddingModel)
-                    .maxResults(5)
-                    .minScore(0.0)
-                    .build();
-            
-            return preciseRetriever.retrieve(query);
-        } catch (Exception e) {
-            System.out.println("[关键词检索] 检索异常（索引可能尚未创建，请先上传文档入库）: " + e.getMessage());
-            return new ArrayList<>();
-        }
-    }
-
-    /**
-     * 融合排序：多路召回结果合并
-     */
-    private List<Content> mergeAndRankResults(List<Content> vectorResults, List<Content> keywordResults) {
-        // 简单融合策略：向量结果优先，关键词结果补充
-        List<Content> merged = new ArrayList<>();
-        
-        // 先添加向量检索结果（权重高）
-        merged.addAll(vectorResults);
-        
-        // 再添加关键词检索结果（去重）
-        for (Content keywordContent : keywordResults) {
-            boolean isDuplicate = false;
-            for (Content existingContent : merged) {
-                // 判断是否重复（基于文本相似度或完全匹配）
-                if (existingContent.textSegment().text().equals(keywordContent.textSegment().text())) {
-                    isDuplicate = true;
-                    break;
-                }
-            }
-            if (!isDuplicate) {
-                merged.add(keywordContent);
-            }
-        }
-        
-        // 限制最终返回数量（Top-K）
-        return merged.stream()
-                .limit(10)
-                .collect(Collectors.toList());
+        return hybridRetrievalService.hybridSearch(userQuestion);
     }
 
     /**

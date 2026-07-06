@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class DevAgentService {
@@ -24,6 +25,92 @@ public class DevAgentService {
     private final ProjectStructureGenerator projectStructureGenerator;
     private final ScriptExecutorService scriptExecutorService;
     private final WebSearchService webSearchService;
+
+    /**
+     * 单次Agent任务的最大连续工具调用次数，防止AI陷入死循环
+     */
+    private static final int MAX_TOOL_CALLS = 50;
+
+    /**
+     * 当前Agent任务已执行的工具调用计数
+     */
+    private final AtomicInteger toolCallCount = new AtomicInteger(0);
+
+    /**
+     * ThreadLocal进度回调，用于SSE实时推送工具调用进度到前端
+     */
+    private static final ThreadLocal<TaskProgressCallback> progressCallback = new ThreadLocal<>();
+
+    /**
+     * 设置当前任务的进度回调
+     */
+    public static void setProgressCallback(TaskProgressCallback callback) {
+        progressCallback.set(callback);
+    }
+
+    /**
+     * 清除当前任务的进度回调
+     */
+    public static void clearProgressCallback() {
+        progressCallback.remove();
+    }
+
+    /** 公开的进度报告方法，供AgentOrchestrator调用 */
+    void reportProgressPublic(String type, String message) {
+        reportProgress(type, message);
+    }
+
+    /**
+     * 向当前任务的进度回调发送进度通知
+     */
+    private void reportProgress(String type, String message) {
+        TaskProgressCallback cb = progressCallback.get();
+        if (cb != null) {
+            cb.onProgress(type, message);
+        }
+        // 同时输出到控制台用于调试
+        System.out.println("[" + type + "] " + message);
+    }
+
+    /**
+     * 是否已触发工具调用上限，触发后后续工具调用直接返回停止提示
+     */
+    private volatile boolean toolLimitReached = false;
+
+    /**
+     * 工具调用已达上限时的返回消息（返回给AI，让AI自行总结已有结果）
+     */
+    private static final String TOOL_LIMIT_MESSAGE = "【系统提示】工具调用次数已达" + MAX_TOOL_CALLS + "次上限。请立即基于已有结果进行总结回答，不要继续调用任何工具。你可以告诉用户：点击下方'继续优化'按钮将自动分配新一轮配额继续执行。";
+
+    /**
+     * 检查是否已达工具调用上限
+     */
+    private void checkToolLimit() {
+        if (toolLimitReached) {
+            return; // 已触发上限，不再递增计数
+        }
+        int count = toolCallCount.incrementAndGet();
+        if (count > MAX_TOOL_CALLS) {
+            toolLimitReached = true;
+            reportProgress("warn", "已达50次上限");
+        }
+    }
+
+    /**
+     * 检查工具调用是否已被限制，若是则返回停止消息
+     */
+    private String checkToolLimitAndStop() {
+        checkToolLimit();
+        return toolLimitReached ? TOOL_LIMIT_MESSAGE : null;
+    }
+
+    /**
+     * Agent任务开始前重置工具调用计数器
+     */
+    private void resetToolCounter() {
+        toolCallCount.set(0);
+        toolLimitReached = false;
+    }
 
     public DevAgentService(ChatLanguageModel chatModel,
                            DevRagService ragService,
@@ -54,6 +141,10 @@ public class DevAgentService {
      * 确保Tool方法返回值不为null或空白，防止LangChain4j抛出IllegalArgumentException
      */
     private String safeReturn(String result) {
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) {
+            return stopMsg;
+        }
         if (result == null || result.isBlank()) {
             return "（工具执行完成，无具体输出）";
         }
@@ -79,49 +170,46 @@ public class DevAgentService {
 
     @Tool("查询项目内部代码、需求文档、历史方案资料。适用于：查找代码示例、理解业务逻辑、查看历史技术方案")
     public String searchDevLib(String question) {
-        System.out.println("[工具调用] 检索知识库: " + question);
+        reportProgress("tool", "检索知识库: " + question);
         String relevantMemories = memoryService.getRelevantMemories(question);
         String enhancedQuestion = question + "\n\n历史参考:\n" + relevantMemories;
         return safeReturn(ragService.ragQuery(enhancedQuestion));
     }
 
-
-    @Tool("输入Service业务代码，生成标准JUnit5单元测试，包含Mock配置和断言")
-    public String genUnitTest(String serviceCode) {
-        System.out.println("[工具调用] 生成单元测试");
-        String prompt = String.format(PromptTemplate.UNIT_TEST_TEMPLATE, serviceCode);
-        return safeGenerate(prompt);
-    }
-
-    @Tool("输入Controller代码，输出标准接口文档：地址、入参、返回体、业务说明、示例")
-    public String genApiDoc(String controllerCode) {
-        System.out.println("[工具调用] 生成接口文档");
-        String prompt = String.format(PromptTemplate.API_DOC_TEMPLATE, controllerCode);
-        return safeGenerate(prompt);
+    @Tool("根据用户需求的类型和详细描述，生成对应的技术内容。taskType可选值：unit_test(单元测试)、api_doc(接口文档)、prd_doc(需求文档)、backend_code(后端代码)、frontend_code(前端代码)、api_call_code(API调用代码)、validation_code(数据验证代码)、migration_script(数据库迁移脚本)、code_review(代码审查)、refactoring(代码重构建议)、config_file(配置文件)、text_summary(文本摘要)、sql_optimize(SQL优化建议)、sql_design(索引设计)、sql_rewrite(SQL重写)、explain_analysis(执行计划分析)、table_design(表结构设计)、crud_sql(表结构SQL生成CRUD)。适用于所有需要AI生成技术内容的场景")
+    public String generateContent(String taskType, String requirement) {
+        reportProgress("tool", "生成内容: " + taskType);
+        String template = PromptTemplate.getTemplate(taskType);
+        if (template == null) {
+            return "未知的任务类型: " + taskType + "，可用类型：unit_test, api_doc, prd_doc, backend_code 等";
+        }
+        return safeGenerate(String.format(template, requirement));
     }
 
     @Tool("将重要对话内容蒸馏为永久记忆，自动提取关键信息并评分。适用于：保存技术方案、记录故障处理经验、保存最佳实践")
     public String distillConversationToMemory(String conversation, String summary) {
-        System.out.println("[工具调用] 数据蒸馏: " + summary);
+        reportProgress("tool", "数据蒸馏: " + summary);
         return safeReturn(memoryService.distillMemory(conversation, summary));
     }
 
     @Tool("检索历史记忆和經驗，查找类似问题的解决方案或相关技术文档")
     public String retrieveMemories(String query, String category) {
-        System.out.println("[工具调用] 检索记忆: " + query);
+        reportProgress("tool", "检索记忆: " + query);
         return safeReturn(memoryService.getRelevantMemories(query));
     }
 
     @Tool("获取记忆库统计信息，包括记忆数量、分类分布、重要性等")
     public String getMemoryStatistics() {
-        System.out.println("[工具调用] 获取记忆统计");
+        reportProgress("tool", "获取记忆统计");
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         Map<String, Object> stats = memoryService.getMemoryStats();
         return "记忆库统计：\n" + stats.toString();
     }
 
     @Tool("输入报错日志，结合历史故障资料输出分步排查修复方案")
     public String analyzeErrorLog(String errorLog) {
-        System.out.println("[工具调用] 分析错误日志");
+        reportProgress("tool", "分析错误日志");
         try {
             String historyCase = ragService.ragQuery("报错：" + errorLog.substring(0, Math.min(150, errorLog.length())));
             String prompt = String.format(PromptTemplate.ERROR_LOG_TEMPLATE, safeReturn(historyCase), errorLog);
@@ -131,13 +219,6 @@ public class DevAgentService {
             return "调用AI服务失败，请检查网络或API配置。错误信息: " + e.getMessage();
         }
     }
-
-    @Tool("根据需求描述生成符合规范的PRD需求文档，包含功能点、业务流程、数据模型")
-    public String genPrdDoc(String requirementDesc) {
-        System.out.println("[工具调用] 生成PRD文档");
-        String prompt = String.format(PromptTemplate.PRD_DOC_TEMPLATE, requirementDesc);
-        return safeGenerate(prompt);
-    }
     /**
      * 【核心】智能Agent执行入口，自动识别任务类型并调度相应工具
      *
@@ -145,13 +226,11 @@ public class DevAgentService {
      * @return 任务执行结果
      */
     public String runDevTask(String taskContent) {
-        System.out.println("\n========== Agent开始执行任务 ==========");
-        System.out.println("任务内容: " + taskContent);
-        System.out.println("======================================\n");
+        reportProgress("start", "任务内容: " + taskContent);
 
         // 【新增】检索相关历史记忆
         String relevantMemories = memoryService.getRelevantMemories(taskContent);
-        System.out.println("检索到相关记忆:\n" + relevantMemories);
+        reportProgress("info", "检索到 " + (relevantMemories != null && !relevantMemories.isEmpty() ? "历史记忆" : "0条记忆"));
 
         DevAgent agent = AiServices.builder(DevAgent.class)
                 .chatLanguageModel(chatModel)
@@ -162,9 +241,10 @@ public class DevAgentService {
         // 将记忆注入到上下文中
         String enhancedTask = taskContent + "\n\n历史参考:\n" + relevantMemories;
 
+        resetToolCounter();
         String result = agent.handleTask(enhancedTask);
 
-        System.out.println("\n========== Agent任务执行完成 ==========\n");
+        reportProgress("done", "Agent任务执行完成");
         
         // 【新增】自动记录对话用于后续批量蒸馏
         distillationScheduler.recordConversation(taskContent, result, "agent_task");
@@ -190,116 +270,20 @@ public class DevAgentService {
         return result;
     }
 
-    @Tool("根据表结构SQL生成对应的Entity、Mapper、Service层代码")
-    public String genCrudCode(String tableSql) {
-        System.out.println("[工具调用] 生成CRUD代码");
-        return safeGenerate(String.format(PromptTemplate.CRUD_CODE_TEMPLATE, tableSql));
-    }
-
-    @Tool("对代码进行CodeReview，检查规范性、潜在bug、性能问题、安全隐患")
-    public String codeReview(String code) {
-        System.out.println("[工具调用] 代码审查");
-        return safeGenerate(String.format(PromptTemplate.CODE_REVIEW_TEMPLATE, code));
-    }
-
-    @Tool("分析SQL语句性能，识别慢查询问题，给出优化建议和索引方案")
-    public String optimizeSql(String sqlQuery) {
-        System.out.println("[工具调用] SQL性能优化分析");
-        return safeGenerate(String.format(PromptTemplate.SQL_OPTIMIZE_TEMPLATE, sqlQuery));
-    }
-
-    @Tool("根据业务场景和查询条件，设计最优的数据库索引策略")
-    public String designIndex(String tableSchema, String queryPatterns) {
-        System.out.println("[工具调用] 索引设计");
-        return safeGenerate(String.format(PromptTemplate.INDEX_DESIGN_TEMPLATE, tableSchema, queryPatterns));
-    }
-
-    @Tool("将复杂SQL重写为高性能版本，优化JOIN、子查询、聚合等操作")
-    public String rewriteSql(String originalSql) {
-        System.out.println("[工具调用] SQL重写优化");
-        return safeGenerate(String.format(PromptTemplate.SQL_REWRITE_TEMPLATE, originalSql));
-    }
-
-    @Tool("生成SQL执行计划分析报告，解读EXPLAIN输出并给出优化建议")
-    public String analyzeExplainPlan(String explainOutput) {
-        System.out.println("[工具调用] 执行计划分析");
-        return safeGenerate(String.format(PromptTemplate.EXPLAIN_ANALYSIS_TEMPLATE, explainOutput));
-    }
-
-    @Tool("根据数据库表结构设计规范的ER图，生成符合第三范式的表结构SQL")
-    public String designTableSchema(String businessRequirement) {
-        System.out.println("[工具调用] 数据库表结构设计");
-        return safeGenerate(String.format(PromptTemplate.TABLE_SCHEMA_TEMPLATE, businessRequirement));
-    }
-
-    // ... existing code ...
-
-    @Tool("根据业务需求描述生成完整的Java后端代码，包括Controller、Service、Entity等分层架构代码")
-    public String generateBackendCode(String requirement) {
-        System.out.println("[工具调用] 生成后端业务代码");
-        return safeGenerate(String.format(PromptTemplate.BACKEND_CODE_TEMPLATE, requirement));
-    }
-
-    @Tool("根据前端需求生成Vue/React组件代码，包括模板、样式和交互逻辑")
-    public String generateFrontendCode(String componentRequirement) {
-        System.out.println("[工具调用] 生成前端组件代码");
-        return safeGenerate(String.format(PromptTemplate.FRONTEND_CODE_TEMPLATE, componentRequirement));
-    }
-
-    @Tool("生成API接口调用代码，包括HTTP请求封装、错误处理、类型定义")
-    public String generateApiCallCode(String apiDescription) {
-        System.out.println("[工具调用] 生成API调用代码");
-        return safeGenerate(String.format(PromptTemplate.API_CALL_CODE_TEMPLATE, apiDescription));
-    }
-
-    @Tool("根据业务规则生成数据验证代码，包括表单验证、业务规则校验")
-    public String generateValidationCode(String validationRules) {
-        System.out.println("[工具调用] 生成数据验证代码");
-        return safeGenerate(String.format(PromptTemplate.VALIDATION_CODE_TEMPLATE, validationRules));
-    }
-
-    @Tool("生成数据库迁移脚本，包括建表语句、索引、外键约束")
-    public String generateMigrationScript(String schemaRequirement) {
-        System.out.println("[工具调用] 生成数据库迁移脚本");
-        return safeGenerate(String.format(PromptTemplate.MIGRATION_SCRIPT_TEMPLATE, schemaRequirement));
-    }
-
-    @Tool("为指定代码生成单元测试，包括正常场景、边界条件、异常情况")
-    public String generateUnitTest(String codeToTest) {
-        System.out.println("[工具调用] 生成单元测试");
-        return safeGenerate(String.format(PromptTemplate.GENERATE_UNIT_TEST_TEMPLATE, codeToTest));
-    }
-
-    @Tool("分析现有代码并给出重构建议和最佳实践")
-    public String suggestCodeRefactoring(String existingCode) {
-        System.out.println("[工具调用] 分析代码并提供重构建议");
-        return safeGenerate(String.format(PromptTemplate.CODE_REFACTORING_TEMPLATE, existingCode));
-    }
-
-    @Tool("生成配置文件代码，包括Dockerfile、docker-compose、CI/CD配置等")
-    public String generateConfigFile(String configType, String requirements) {
-        System.out.println("[工具调用] 生成配置文件");
-        return safeGenerate(String.format(PromptTemplate.CONFIG_FILE_TEMPLATE, configType, requirements));
-    }
-
-    @Tool("对输入的长文本、对话、技术记忆内容生成精简AI摘要，支持结合上下文提炼核心要点，输出简短总结")
-    public String generateTextSummary(String fullContent, String extraHint) {
-        System.out.println("[工具调用] AI文本摘要生成");
-        return safeGenerate(String.format(PromptTemplate.TEXT_SUMMARY_TEMPLATE, extraHint, fullContent));
-    }
-
     // ==================== 脚本执行工具 ====================
 
     @Tool("执行本地脚本进行文件操作。可用脚本: file_list.bat(列出目录), file_read.bat(读文件), file_create.bat(创建目录), file_copy.bat(复制文件), file_search.bat(搜索文件), file_tree.bat(目录树)。参数用空格分隔，路径含空格请用引号括起")
     public String executeScript(String scriptName, String arg1, String arg2) {
-        System.out.println("[工具调用] 执行脚本: " + scriptName + " " + arg1 + " " + arg2);
+        reportProgress("tool", "执行脚本: " + scriptName + " " + arg1 + " " + arg2);
         String result = scriptExecutorService.execute(scriptName, arg1, arg2);
         return safeReturn(result);
     }
 
     @Tool("列出所有可用的本地操作脚本及其用途")
     public String listScripts() {
-        System.out.println("[工具调用] 列出可用脚本");
+        reportProgress("tool", "列出可用脚本");
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         return "可用脚本列表:\n" +
                "  file_list.bat <目录>      - 列出目录内容\n" +
                "  file_read.bat <文件>      - 读取文件内容\n" +
@@ -319,8 +303,9 @@ public class DevAgentService {
      */
     @Tool("扫描IntelliJ IDEA项目的编译错误，自动分析错误原因并生成修复方案。适用于：项目编译失败、批量修复错误、代码审查")
     public String scanAndFixIdeaErrors(String projectPath) {
-        System.out.println("[工具调用] 扫描IDEA编译错误");
-        
+        reportProgress("tool", "扫描IDEA编译错误");
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         // 1. 执行编译扫描
         IdeaErrorAnalyzerService.CompileResult result = ideaErrorAnalyzerService.scanCompileErrors(projectPath);
         
@@ -343,7 +328,7 @@ public class DevAgentService {
      */
     @Tool("分析Java运行时异常堆栈，定位问题根因并生成修复方案。适用于：NullPointerException、ClassCastException等运行时错误排查")
     public String analyzeRuntimeError(String stackTrace) {
-        System.out.println("[工具调用] 分析运行时异常");
+        reportProgress("tool", "分析运行时异常");
         String prompt = String.format(PromptTemplate.IDEA_RUNTIME_ERROR_FIX_TEMPLATE, stackTrace, "（无相关源码）");
         return safeGenerate(prompt);
     }
@@ -357,7 +342,9 @@ public class DevAgentService {
      */
     @Tool("在本地文件系统创建目录，支持多级目录自动创建。适用于：创建项目目录、模块目录等")
     public String createDirectory(String dirPath) {
-        System.out.println("[工具调用] 创建目录: " + dirPath);
+        reportProgress("tool", "创建目录: " + dirPath);
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         LocalFileOperationService.FileOperationResult result = fileOperationService.createDirectory(dirPath);
         return result.success ? "✅ " + result.message : "❌ " + result.message;
     }
@@ -370,7 +357,9 @@ public class DevAgentService {
      */
     @Tool("在本地文件系统创建文件，自动创建父目录。适用于：创建代码文件、配置文件、文档文件等")
     public String createFile(String filePath, String content) {
-        System.out.println("[工具调用] 创建文件: " + filePath);
+        reportProgress("tool", "创建文件: " + filePath);
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         LocalFileOperationService.FileOperationResult result = fileOperationService.createFile(filePath, content);
         return result.success ? "✅ " + result.message : "❌ " + result.message;
     }
@@ -382,7 +371,9 @@ public class DevAgentService {
      */
     @Tool("读取本地文件内容。适用于：查看代码文件、配置文件、日志文件等")
     public String readFile(String filePath) {
-        System.out.println("[工具调用] 读取文件: " + filePath);
+        reportProgress("tool", "读取文件: " + filePath);
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         return fileOperationService.readFile(filePath);
     }
 
@@ -393,7 +384,9 @@ public class DevAgentService {
      */
     @Tool("列出指定目录下的文件和子目录。适用于：查看项目结构、查找文件等")
     public String listDirectory(String dirPath) {
-        System.out.println("[工具调用] 列出目录: " + dirPath);
+        reportProgress("tool", "列出目录: " + dirPath);
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         var items = fileOperationService.listDirectory(dirPath, false);
         if (items.isEmpty()) {
             return "目录为空或不存在";
@@ -417,8 +410,10 @@ public class DevAgentService {
      */
     @Tool("生成完整的Spring Boot项目结构，包括标准目录布局、pom.xml、主启动类、配置文件等。适用于：快速搭建新项目")
     public String generateSpringBootProject(String projectPath, String projectName, String packageName) {
-        System.out.println("[工具调用] 生成Spring Boot项目: " + projectName);
-        ProjectStructureGenerator.GenerateResult result = 
+        reportProgress("tool", "生成Spring Boot项目: " + projectName);
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
+        ProjectStructureGenerator.GenerateResult result =
                 projectStructureGenerator.generateSpringBootProject(projectPath, projectName, packageName);
         
         if (result.success) {
@@ -438,7 +433,9 @@ public class DevAgentService {
      */
     @Tool("为指定实体生成完整的CRUD代码，包括Entity、Repository、Service、Controller、DTO等。适用于：快速生成业务模块代码")
     public String generateCrudModuleCode(String projectPath, String packageName, String entityName) {
-        System.out.println("[工具调用] 生成CRUD模块代码: " + entityName);
+        reportProgress("tool", "生成CRUD模块代码: " + entityName);
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         ProjectStructureGenerator.GenerateResult result = 
                 projectStructureGenerator.generateLayeredCode(projectPath, packageName, entityName, entityName);
         
@@ -456,7 +453,7 @@ public class DevAgentService {
      */
     @Tool("根据需求设计项目架构方案，包括技术选型、目录结构、模块划分、代码骨架等。适用于：新项目架构设计、架构评审")
     public String designProjectArchitecture(String requirement) {
-        System.out.println("[工具调用] 设计项目架构");
+        reportProgress("tool", "设计项目架构");
         String prompt = String.format(PromptTemplate.PROJECT_STRUCTURE_DESIGN_TEMPLATE, requirement);
         return safeGenerate(prompt);
     }
@@ -469,7 +466,9 @@ public class DevAgentService {
      */
     @Tool("在网络中搜索相关技术信息，经过多轮筛选去重后返回高质量内容。适用于：查询最新技术动态、API文档、开源方案、技术对比、行业资讯等需要实时网络资料的场景")
     public String searchWeb(String query) {
-        System.out.println("[工具调用] 网络搜索: " + query);
+        reportProgress("tool", "网络搜索: " + query);
+        String stopMsg = checkToolLimitAndStop();
+        if (stopMsg != null) return stopMsg;
         try {
             WebSearchService.WebSearchResult result = webSearchService.search(query);
             return result.toPromptContext();
@@ -491,7 +490,7 @@ public class DevAgentService {
      * @return 每个任务的执行结果
      */
     public String runBatchTasks(String tasks) {
-        System.out.println("\n========== Agent开始执行批量任务 ==========");
+        reportProgress("start", "开始执行批量任务");
 
         DevAgent agent = AiServices.builder(DevAgent.class)
                 .chatLanguageModel(chatModel)
@@ -500,9 +499,10 @@ public class DevAgentService {
                 .build();
 
         String prompt = "请依次执行以下任务，每个任务完成后输出结果：\n\n" + tasks;
+        resetToolCounter();
         String result = agent.handleTask(prompt);
 
-        System.out.println("\n========== 批量任务执行完成 ==========\n");
+        reportProgress("done", "批量任务执行完成");
         return result;
     }
 
@@ -512,7 +512,7 @@ public class DevAgentService {
      * @return 任务执行结果
      */
     public String runTaskWithContext(TaskAnalysisResult analysis) {
-        System.out.println("\n========== Agent执行带上下文的任务 ==========");
+        reportProgress("start", "意图: " + analysis.getPrimaryIntent().getDisplayName());
 
         DevAgent agent = AiServices.builder(DevAgent.class)
                 .chatLanguageModel(chatModel)
@@ -522,9 +522,10 @@ public class DevAgentService {
        // 将 analysis 对象序列化为任务描述字符串
         String taskDescription = buildTaskDescription(analysis);
         System.out.println("任务描述字符串 = " + taskDescription);
+        resetToolCounter();
         String result = agent.handleTask(taskDescription);
 
-        System.out.println("\n========== 任务执行完成 ==========\n");
+        reportProgress("done", "任务执行完成");
         return result;
     }
 
@@ -566,12 +567,7 @@ public class DevAgentService {
      * @return AI回答
      */
     public String askWithContext(String question, String contextHistory, boolean enableRag, boolean enableWebSearch) {
-        System.out.println("\n========== 带上下文问答 ==========");
-        System.out.println("当前问题: " + question);
-        System.out.println("上下文长度: " + (contextHistory != null ? contextHistory.length() : 0) + " 字符");
-        System.out.println("RAG检索: " + (enableRag ? "开启" : "关闭"));
-        System.out.println("联网搜索: " + (enableWebSearch ? "开启" : "关闭"));
-        System.out.println("======================================\n");
+        reportProgress("start", "问题: " + question);
 
         // 构建带上下文的prompt，使用模板
         String safeContext = (contextHistory != null && !contextHistory.trim().isEmpty()) ? contextHistory : "";
@@ -727,6 +723,13 @@ public class DevAgentService {
             - 你确实可以访问文件系统，工具已经为你准备好了
             - 如果用户没有指定路径，请主动询问用户期望的创建路径
             - 执行完成后，告诉用户文件创建在了哪里
+
+            【工具调用限制 - 重要】
+            - 【最关键】生成代码、单元测试、接口文档、PRD文档等内容时，**请直接在回答中输出**，无需调用任何工具。你有足够的知识直接生成这些内容。
+            - 调用工具只用于：检索知识库(searchDevLib)、文件操作(createFile/readFile/createDirectory/listDirectory)、网络搜索(searchWeb)、扫描错误(scanAndFixIdeaErrors)、执行脚本(executeScript)
+            - 每次调用工具后，评估是否已获取足够信息。如果是，直接输出最终答案
+            - 一次请求中，连续工具调用不应超过 5 次
+            - 每个工具只能调用一次，不要重复调用同一个工具
             """;
 
     public interface DevAgent {

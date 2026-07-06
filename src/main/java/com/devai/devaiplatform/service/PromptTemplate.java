@@ -1621,4 +1621,34 @@ public class PromptTemplate {
     public static String format(String template, Object... args) {
         return String.format(template, args);
     }
+
+    /**
+     * 根据任务类型获取对应的模板
+     * @param taskType 任务类型
+     * @return 模板字符串，如果找不到则返回null
+     */
+    public static String getTemplate(String taskType) {
+        if (taskType == null) return null;
+        return switch (taskType) {
+            case "unit_test" -> UNIT_TEST_TEMPLATE;
+            case "api_doc" -> API_DOC_TEMPLATE;
+            case "prd_doc" -> PRD_DOC_TEMPLATE;
+            case "backend_code" -> BACKEND_CODE_TEMPLATE;
+            case "frontend_code" -> FRONTEND_CODE_TEMPLATE;
+            case "api_call_code" -> API_CALL_CODE_TEMPLATE;
+            case "validation_code" -> VALIDATION_CODE_TEMPLATE;
+            case "migration_script" -> MIGRATION_SCRIPT_TEMPLATE;
+            case "crud_sql" -> CRUD_CODE_TEMPLATE;
+            case "code_review" -> CODE_REVIEW_TEMPLATE;
+            case "refactoring" -> CODE_REFACTORING_TEMPLATE;
+            case "config_file" -> CONFIG_FILE_TEMPLATE;
+            case "text_summary" -> TEXT_SUMMARY_TEMPLATE;
+            case "sql_optimize" -> SQL_OPTIMIZE_TEMPLATE;
+            case "sql_design" -> INDEX_DESIGN_TEMPLATE;
+            case "sql_rewrite" -> SQL_REWRITE_TEMPLATE;
+            case "explain_analysis" -> EXPLAIN_ANALYSIS_TEMPLATE;
+            case "table_design" -> TABLE_SCHEMA_TEMPLATE;
+            default -> null;
+        };
+    }
 }
