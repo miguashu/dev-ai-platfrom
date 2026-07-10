@@ -105,6 +105,10 @@ dev-ai-platform/
 │   │   ├── ScriptExecutorService.java     # 本地脚本执行引擎
 │   │   ├── IdeaErrorAnalyzerService.java  # IDEA 编译/运行时错误分析
 │   │   ├── AISummaryService.java          # AI 摘要生成
+│   │   ├── ContentSecurityService.java    # 内容安全校验（20+ 正则，防病毒/泄漏）
+│   │   ├── ContextCompressionService.java # 上下文压缩
+│   │   ├── WebSearchService.java          # 联网搜索
+│   │   ├── AiKeywordExtractorService.java # AI 关键词提取
 │   │   └── PromptTemplate.java            # Prompt 模板集合
 │   └── DevAiPlatformApplication.java      # 启动类
 ├── src/main/resources/
@@ -425,12 +429,32 @@ script.timeout-seconds=30
 
 ## 🔒 安全机制
 
-- **文件操作路径白名单** — 限制 AI 只能操作指定目录
-- **文件名安全校验** — 防路径遍历、防注入攻击
-- **文件类型白名单** — 仅允许 PDF 上传
-- **脚本执行沙箱** — 禁止路径遍历，超时自动终止
-- **操作日志记录** — 所有文件操作可追溯
-- **API Key 认证** — Agent 通信协议使用 API Key 鉴权
+| 防护层级 | 机制 | 实现位置 |
+|---------|------|----------|
+| 🚨 严重威胁拦截 | 下载/安装/远程执行/提权命令强制拦截（零容忍） | `ContentSecurityService`（6组正则） |
+| 🔴 高危拦截 | 敏感信息（密码/密钥/私钥）+ 恶意代码（反弹Shell/Webshell） | `ContentSecurityService`（20+ 正则模式） |
+| 🟡 中危防护 | SQL注入 / XSS攻击 / 本地路径泄漏 / 内网IP泄漏 | `ContentSecurityService` |
+| 🧠 AI 提示词约束 | 在 `AGENT_SYSTEM_PROMPT` 中明确写入安全红线 | `DevAgentService` 第 790-817 行 |
+| 📁 路径白名单 | 限制 AI 只能操作 `file.allowed-paths` 指定目录 | `application.properties` |
+| 📄 文件名校验 | 防路径遍历、防注入攻击 | `LocalFileOperationService` |
+| 📎 文件类型白名单 | 仅允许 PDF 上传到知识库 | `DevRagService` |
+| ⏱ 脚本执行沙箱 | 禁止路径遍历，超时自动终止 | `ScriptExecutorService` |
+| 📝 操作日志 | 所有文件操作可追溯 | `LocalFileOperationService` |
+
+### 安全校验覆盖范围
+
+所有外部数据入口均已接入安全校验：
+
+```
+用户请求
+  ├─ searchWeb()    → 联网搜索      → checkContent(content, "web_search")
+  ├─ searchDevLib() → 知识库RAG检索 → checkContent(content, "rag_pdf")
+  └─ askWithContext()
+       ├─ 联网搜索分支              → checkContent(content, "web_search")
+       └─ RAG检索分支               → checkContent(content, "rag_pdf")
+```
+
+> 详细规则请参见 [SECURITY_INSTALL_BLOCK_RULES.md](SECURITY_INSTALL_BLOCK_RULES.md)。
 
 ## 📄 License
 

@@ -74,7 +74,17 @@ public class FallbackChatLanguageModel implements ChatLanguageModel {
             }
             return result;
         } catch (Exception e) {
-            System.err.println("[LLM降级] ⚠️ 云端模型 " + primaryName + " 调用失败: " + e.getMessage());
+            String errorMsg = e.getMessage();
+            boolean isAuthError = errorMsg != null && (errorMsg.contains("Authentication") || 
+                                                       errorMsg.contains("invalid_request_error") ||
+                                                       errorMsg.contains("api key"));
+            
+            if (isAuthError) {
+                System.err.println("[LLM降级] ⚠️ 云端模型 API Key 无效: " + errorMsg);
+                System.err.println("[LLM降级] 💡 请在 application.properties 中配置正确的 deepseek.api-key");
+            } else {
+                System.err.println("[LLM降级] ⚠️ 云端模型 " + primaryName + " 调用失败: " + errorMsg);
+            }
             System.err.println("[LLM降级] 📡 自动降级到本地模型 " + fallbackName);
             useFallback.set(true);
 
@@ -87,8 +97,11 @@ public class FallbackChatLanguageModel implements ChatLanguageModel {
                 return result;
             } catch (Exception ex) {
                 System.err.println("[LLM降级] ❌ 本地模型也调用失败: " + ex.getMessage());
-                return "[错误] 云端模型和本地模型均不可用。请检查网络连接或确保Ollama服务已启动。" +
-                       "\n云端错误: " + e.getMessage() +
+                String hint = isAuthError ? 
+                    "\n\n【解决方案】请在 application.properties 文件中配置有效的 DeepSeek API Key，或者确保 Ollama 服务正在运行。" :
+                    "\n\n【解决方案】请检查网络连接或确保 Ollama 服务已启动（http://127.0.0.1:11434）。";
+                return "[错误] 云端模型和本地模型均不可用。" + hint +
+                       "\n云端错误: " + errorMsg +
                        "\n本地错误: " + ex.getMessage();
             }
         }

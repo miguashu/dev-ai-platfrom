@@ -5,6 +5,7 @@ package com.devai.devaiplatform.service;
  * 根据查询复杂度自动调整检索策略，直接降低检索耗时
  *
  * 核心思路：简单查询少花时间，复杂查询多花资源
+ * 【新增】支持叠加 RagTuningService 的自动调参偏移量
  */
 public class RetrievalParams {
 
@@ -37,11 +38,21 @@ public class RetrievalParams {
      * 核心降耗时逻辑：简单查询用最小资源，复杂查询才投入更多
      */
     public static RetrievalParams analyze(String query) {
+        return analyze(query, null);
+    }
+
+    /**
+     * 带调参偏移量的分析
+     * @param query 用户查询
+     * @param offsets 调参偏移量（可为null）
+     */
+    public static RetrievalParams analyze(String query, RagTuningService.TuningOffsets offsets) {
         RetrievalParams params = new RetrievalParams();
 
         if (query == null || query.isBlank()) {
             params.setSimple();
             params.complexityLevel = "EMPTY";
+            params.applyOffsets(offsets);
             return params;
         }
 
@@ -60,7 +71,25 @@ public class RetrievalParams {
             params.complexityLevel = "COMPLEX";
         }
 
+        // 【核心】叠加调参偏移量
+        params.applyOffsets(offsets);
+
         return params;
+    }
+
+    /**
+     * 应用调参偏移量到当前参数上
+     * 安全边界检查确保参数不会超出合理范围
+     */
+    private void applyOffsets(RagTuningService.TuningOffsets offsets) {
+        if (offsets == null || !offsets.hasAdjustment()) {
+            return;
+        }
+
+        this.topK = clampInt(this.topK + offsets.topKDelta, 3, 30);
+        this.minScore = clampDouble(this.minScore + offsets.minScoreDelta, 0.0, 0.8);
+        this.bm25Boost = clampDouble(this.bm25Boost + offsets.bm25BoostDelta, 0.1, 3.0);
+        this.knnBoost = clampDouble(this.knnBoost + offsets.knnBoostDelta, 0.1, 3.0);
     }
 
     /** 简单查询配置：最小资源，最快响应 */
@@ -107,6 +136,14 @@ public class RetrievalParams {
             }
         }
         return Math.max(count, 1);
+    }
+
+    private static int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static double clampDouble(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     @Override

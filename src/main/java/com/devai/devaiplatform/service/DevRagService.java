@@ -1,5 +1,7 @@
 package com.devai.devaiplatform.service;
 
+import com.devai.devaiplatform.entity.UploadedFile;
+import com.devai.devaiplatform.repository.UploadedFileRepository;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentParser;
 import dev.langchain4j.data.document.DocumentSplitter;
@@ -29,6 +31,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -48,6 +51,7 @@ public class DevRagService {
     private final DocumentParser pdfParser;
     private final OcrService ocrService;
     private final PdfDataExtractor pdfDataExtractor;  // 【新增】PDF全面提取器
+    private final UploadedFileRepository uploadedFileRepository;  // 【新增】文件记录仓库
 
     private static final int LEVEL1_CHUNK_SIZE = 2000;
     private static final int LEVEL1_OVERLAP = 200;
@@ -67,13 +71,15 @@ public class DevRagService {
                          VectorStoreService vectorStoreService,
                          HybridRetrievalService hybridRetrievalService,
                          OcrService ocrService,
-                         PdfDataExtractor pdfDataExtractor) {
+                         PdfDataExtractor pdfDataExtractor,
+                         UploadedFileRepository uploadedFileRepository) {
         this.chatModel = chatModel;
         this.embeddingModel = embeddingModel;
         this.vectorStoreService = vectorStoreService;
         this.hybridRetrievalService = hybridRetrievalService;
         this.ocrService = ocrService;
         this.pdfDataExtractor = pdfDataExtractor;
+        this.uploadedFileRepository = uploadedFileRepository;
         this.pdfParser = new ApachePdfBoxDocumentParser();
 
         ContentRetriever contentRetriever = EmbeddingStoreContentRetriever.builder()
@@ -369,7 +375,7 @@ public class DevRagService {
             answer = "知识库尚未初始化，请先上传文档到知识库后再提问。";
         }
 
-        // 【引用标注】在答案末尾附加文件来源
+        // 【引用标注】在答案末尾附加文件来源链接
         String citationBlock = buildCitationBlock(allContents);
         if (!citationBlock.isEmpty()) {
             answer = answer + citationBlock;
@@ -448,6 +454,66 @@ public class DevRagService {
      */
     private List<Content> hybridRetrieval(String userQuestion) {
         return hybridRetrievalService.hybridSearch(userQuestion);
+    }
+
+    /**
+     * 【公开】混合检索接口，供外部服务调用以生成引用链接
+     * @param question 用户问题
+     * @return 检索结果列表（包含文件来源元数据）
+     */
+    public List<Content> hybridRetrievalForCitation(String question) {
+        return hybridRetrieval(question);
+    }
+
+    /**
+     * 【新增】带详情的检索接口，返回分数、来源、召回统计等可视化数据
+     * @param question 用户查询
+     * @return 包含 segments(片段详情列表)、stats(召回统计)、sourceFiles(来源文件列表) 的Map
+     */
+    public Map<String, Object> retrieveWithDetail(String question) {
+        long startTime = System.currentTimeMillis();
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        List<Content> contents = hybridRetrieval(question);
+        long elapsed = System.currentTimeMillis() - startTime;
+
+        // 构建片段详情列表
+        List<Map<String, Object>> segments = new ArrayList<>();
+        Set<String> uniqueFiles = new LinkedHashSet<>();
+
+        for (int i = 0; i < contents.size(); i++) {
+            Content content = contents.get(i);
+            TextSegment segment = content.textSegment();
+            String fileName = segment.metadata().getString("file_name");
+            if (fileName == null || fileName.isEmpty()) fileName = "未知来源";
+            uniqueFiles.add(fileName);
+
+            Map<String, Object> segDetail = new LinkedHashMap<>();
+            segDetail.put("index", i + 1);
+            segDetail.put("fileName", fileName);
+            segDetail.put("textPreview", segment.text().substring(0, Math.min(200, segment.text().length())));
+            segDetail.put("textLength", segment.text().length());
+            segDetail.put("chunkLevel", segment.metadata().getString("chunk_level"));
+            // 模拟相关性分数（基于排名位置）
+            double score = Math.max(0.1, 1.0 - (i * 0.08));
+            segDetail.put("relevanceScore", Math.round(score * 100.0) / 100.0);
+            segments.add(segDetail);
+        }
+
+        // 召回统计
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("totalSegments", contents.size());
+        stats.put("uniqueFiles", uniqueFiles.size());
+        stats.put("elapsedMs", elapsed);
+        stats.put("avgRelevance", segments.stream()
+                .mapToDouble(s -> (Double) s.get("relevanceScore")).average().orElse(0.0));
+
+        result.put("query", question);
+        result.put("segments", segments);
+        result.put("stats", stats);
+        result.put("sourceFiles", new ArrayList<>(uniqueFiles));
+
+        return result;
     }
 
     /**
@@ -626,6 +692,23 @@ public class DevRagService {
             loadSingleDocument(filePath.toString());
             
             System.out.println("[文件上传] ✓ 处理完成");
+            
+            // 【新增】5. 写入数据库 uploaded_file 表
+            try {
+                UploadedFile uf = new UploadedFile();
+                uf.setFileName(uniqueFilename);
+                uf.setOriginalName(originalFilename);
+                uf.setFilePath(filePath.toAbsolutePath().toString());
+                uf.setFileSize(file.getSize());
+                uf.setSource("single_upload");
+                uf.setIngestStatus("ingested");
+                uf.setSegmentCount(vectorStoreService.getStats().getTotalSegments());
+                uf.setCreateTime(LocalDateTime.now());
+                uploadedFileRepository.save(uf);
+                System.out.println("[文件上传] ✅ 数据库记录已保存: " + uniqueFilename);
+            } catch (Exception dbEx) {
+                System.err.println("[文件上传] ⚠️ 数据库记录保存失败（不影响向量库）: " + dbEx.getMessage());
+            }
             
             // 5. 返回成功
             String msg = "✅ PDF上传并入库成功: " + uniqueFilename;

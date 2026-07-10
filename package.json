@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "@antv/x6": "^2.19.2"
+  }
+}

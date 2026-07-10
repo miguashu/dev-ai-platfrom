@@ -3,6 +3,10 @@ package com.devai.devaiplatform.controller;
 import com.devai.devaiplatform.common.Result;
 import com.devai.devaiplatform.config.agent.AgentConfig;
 import com.devai.devaiplatform.config.agent.AgentConfigService;
+import com.devai.devaiplatform.entity.RagFeedback;
+import com.devai.devaiplatform.repository.RagFeedbackRepository;
+import com.devai.devaiplatform.entity.UploadedFile;
+import com.devai.devaiplatform.repository.UploadedFileRepository;
 import com.devai.devaiplatform.service.*;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,6 +50,13 @@ public class DevAiController {
     private final AgentOrchestrator orchestrator;  // 多Agent编排器
     private final AgentConfigService agentConfigService;  // 【新增】Agent配置服务
     private final MessageRouterService messageRouterService;  // 【新增】消息路由服务
+    private final WorkflowEngine workflowEngine;  // 【新增】工作流引擎
+    private final com.devai.devaiplatform.repository.WorkflowRepository workflowRepository;  // 【新增】工作流仓库
+    private final UploadedFileRepository uploadedFileRepository;  // 【新增】上传文件仓库
+    private final VectorStoreService vectorStoreService;  // 【新增】向量库服务
+    private final RagFeedbackRepository ragFeedbackRepository;  // 【新增】RAG反馈仓库
+    private final RagTuningService ragTuningService;  // 【新增】RAG自动调参服务
+    private final ContextCompressionService contextCompressionService;  // 【新增】上下文压缩服务
 
     // 【新增】文件上传安全配置
     @Value("${file.upload.max-size:52428800}") // 默认50MB
@@ -83,7 +94,14 @@ public class DevAiController {
                            ChatHistoryService chatHistoryService,
                            AgentConfigService agentConfigService,
                            AgentOrchestrator orchestrator,
-                           MessageRouterService messageRouterService) {
+                           MessageRouterService messageRouterService,
+                           WorkflowEngine workflowEngine,
+                           com.devai.devaiplatform.repository.WorkflowRepository workflowRepository,
+                           UploadedFileRepository uploadedFileRepository,
+                           VectorStoreService vectorStoreService,
+                           RagFeedbackRepository ragFeedbackRepository,
+                           RagTuningService ragTuningService,
+                           ContextCompressionService contextCompressionService) {
         this.ragService = ragService;
         this.agentService = agentService;
         this.ocrService = ocrService;
@@ -96,6 +114,13 @@ public class DevAiController {
         this.agentConfigService = agentConfigService;
         this.orchestrator = orchestrator;
         this.messageRouterService = messageRouterService;
+        this.workflowEngine = workflowEngine;
+        this.workflowRepository = workflowRepository;
+        this.uploadedFileRepository = uploadedFileRepository;
+        this.vectorStoreService = vectorStoreService;
+        this.ragFeedbackRepository = ragFeedbackRepository;
+        this.ragTuningService = ragTuningService;
+        this.contextCompressionService = contextCompressionService;
     }
 
     // ==================== 智能路由分发 ====================
@@ -377,6 +402,81 @@ public class DevAiController {
         return Result.success(ragService.ragQuery(question));
     }
 
+    /**
+     * 【新增】获取向量库中所有文件列表（含片段数）
+     * 用于前端知识库管理弹窗展示
+     */
+    @GetMapping("/lib/files")
+    public Result<List<Map<String, Object>>> listVectorFiles() {
+        // 优先从向量库聚合获取，回退到数据库
+        List<Map<String, Object>> files = vectorStoreService.listFilesWithCounts();
+        if (files.isEmpty()) {
+            // 回退：从数据库 uploaded_file 表获取
+            List<UploadedFile> dbFiles = uploadedFileRepository.findAllByOrderByCreateTimeDesc();
+            for (UploadedFile uf : dbFiles) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("fileName", uf.getFileName());
+                item.put("segmentCount", uf.getSegmentCount() != null ? uf.getSegmentCount() : 0);
+                item.put("originalName", uf.getOriginalName());
+                item.put("createTime", uf.getCreateTime() != null ? uf.getCreateTime().toString() : "");
+                item.put("fileSize", uf.getFileSize());
+                files.add(item);
+            }
+        }
+        return Result.success(files);
+    }
+
+    /**
+     * 【新增】删除向量库中的文件（支持单个和批量）
+     * 同时删除数据库记录和磁盘文件
+     * @param fileNames 文件名列表（JSON数组）
+     */
+    @DeleteMapping("/lib/files")
+    public Result<Map<String, Object>> deleteVectorFiles(@RequestBody List<String> fileNames) {
+        if (fileNames == null || fileNames.isEmpty()) {
+            return Result.badRequest("请提供要删除的文件名列表");
+        }
+
+        int totalDeletedSegments = 0;
+        int totalDeletedFiles = 0;
+        List<String> failedFiles = new ArrayList<>();
+
+        for (String fileName : fileNames) {
+            try {
+                // 1. 删除向量库中的片段
+                int deletedSegments = vectorStoreService.deleteByFileName(fileName);
+                totalDeletedSegments += deletedSegments;
+
+                // 2. 删除数据库记录
+                UploadedFile uf = uploadedFileRepository.findByFileName(fileName);
+                if (uf != null) {
+                    uploadedFileRepository.delete(uf);
+                }
+
+                // 3. 尝试删除磁盘文件
+                Path filePath = Paths.get(UPLOAD_TEMP_DIR, fileName);
+                if (Files.exists(filePath)) {
+                    Files.delete(filePath);
+                    System.out.println("[文件删除] ✅ 磁盘文件已删除: " + filePath);
+                }
+
+                totalDeletedFiles++;
+                System.out.println("[文件删除] ✅ " + fileName + " → 向量" + deletedSegments + "条");
+            } catch (Exception e) {
+                System.err.println("[文件删除] ❌ " + fileName + " - " + e.getMessage());
+                failedFiles.add(fileName);
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("deletedFiles", totalDeletedFiles);
+        result.put("deletedSegments", totalDeletedSegments);
+        result.put("failedFiles", failedFiles);
+        result.put("message", String.format("成功删除 %d 个文件，%d 条向量片段", totalDeletedFiles, totalDeletedSegments));
+
+        return Result.success(result);
+    }
+
     // ==================== Agent智能任务执行 ====================
 
     /**
@@ -468,7 +568,7 @@ public class DevAiController {
         boolean enableWebSearch = Boolean.parseBoolean(body.getOrDefault("enableWebSearch", "false"));
 
         // ========== 【智能路由】自动判断是否需要走向量库/联网搜索 ==========
-        MessageRouteType routeType = messageRouterService.route(taskContent);
+        final MessageRouteType routeType = messageRouterService.route(taskContent);
         System.out.println("[智能路由] 消息路由结果: " + routeType.getDisplayName()
                 + " → enableRag=" + routeType.isEnableRag() + ", enableWebSearch=" + routeType.isEnableWebSearch());
 
@@ -675,6 +775,90 @@ public class DevAiController {
         return Result.success(distillationScheduler.triggerDistillationNow());
     }
 
+    // ==================== 上下文压缩管理 ====================
+
+    /**
+     * 【新增】手动触发上下文压缩
+     * @param sessionId 会话ID
+     * @return 压缩后的摘要
+     */
+    @PostMapping("/context/compress")
+    public Result<Map<String, Object>> compressContext(@RequestParam String sessionId) {
+        System.out.println("\n========== 手动触发上下文压缩 ==========");
+        System.out.println("会话ID: " + sessionId);
+
+        // 1. 获取会话历史
+        ChatHistoryService.ChatSession session = chatHistoryService.getSession(sessionId);
+        if (session == null || session.getMessages() == null || session.getMessages().isEmpty()) {
+            return Result.badRequest("会话不存在或没有消息");
+        }
+
+        // 2. 执行压缩
+        String compressedSummary = contextCompressionService.triggerManualCompression(
+                sessionId, session.getMessages());
+
+        // 3. 返回结果
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("sessionId", sessionId);
+        response.put("originalMessageCount", session.getMessages().size());
+        response.put("compressedSummary", compressedSummary);
+        response.put("compressionStats", contextCompressionService.getCompressionStats(sessionId));
+
+        return Result.success(response);
+    }
+
+    /**
+     * 【新增】获取上下文压缩统计信息
+     * @param sessionId 会话ID
+     * @return 压缩统计
+     */
+    @GetMapping("/context/stats")
+    public Result<Map<String, Object>> getContextCompressionStats(@RequestParam String sessionId) {
+        return Result.success(contextCompressionService.getCompressionStats(sessionId));
+    }
+
+    /**
+     * 【新增】检查是否需要压缩上下文
+     * @param sessionId 会话ID
+     * @return 是否需要压缩
+     */
+    @GetMapping("/context/should-compress")
+    public Result<Map<String, Object>> shouldCompressContext(@RequestParam String sessionId) {
+        ChatHistoryService.ChatSession session = chatHistoryService.getSession(sessionId);
+        boolean shouldCompress = false;
+        int messageCount = 0;
+        int totalChars = 0;
+
+        if (session != null && session.getMessages() != null) {
+            messageCount = session.getMessages().size();
+            totalChars = session.getMessages().stream()
+                    .mapToInt(msg -> msg.getContent() != null ? msg.getContent().length() : 0)
+                    .sum();
+            shouldCompress = contextCompressionService.shouldCompress(session.getMessages());
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("sessionId", sessionId);
+        response.put("shouldCompress", shouldCompress);
+        response.put("messageCount", messageCount);
+        response.put("totalChars", totalChars);
+        response.put("thresholdMessages", 20);  // MAX_CONTEXT_MESSAGES
+        response.put("thresholdChars", 15000);   // MAX_CONTEXT_CHARS
+
+        return Result.success(response);
+    }
+
+    /**
+     * 【新增】清除会话的压缩状态
+     * @param sessionId 会话ID
+     * @return 操作结果
+     */
+    @DeleteMapping("/context/state")
+    public Result<String> clearCompressionState(@RequestParam String sessionId) {
+        contextCompressionService.clearCompressionState(sessionId);
+        return Result.success("已清除会话压缩状态: " + sessionId);
+    }
+
     /**
      * 24. 上传单个PDF文件到知识库（带安全校验）
      * @param file PDF文件
@@ -861,6 +1045,37 @@ public class DevAiController {
             int ingested = ragService.ingestOcrResults(results, fileNameMapping);
             System.out.println("[OCR批量上传] 向量库入库: " + ingested + "/" + results.size() + " 个文档");
 
+            // 【新增】将每个成功处理的文件写入数据库 uploaded_file 表
+            for (Map.Entry<String, String> entry : fileNameMapping.entrySet()) {
+                String safeName = entry.getKey();
+                String uniqueName = entry.getValue();
+                try {
+                    // 查找对应的 OCR 结果获取片段信息
+                    OcrService.OcrResult matchedResult = null;
+                    for (OcrService.OcrResult r : results) {
+                        if (safeName.equals(r.getFileName())) {
+                            matchedResult = r;
+                            break;
+                        }
+                    }
+
+                    UploadedFile uf = new UploadedFile();
+                    uf.setFileName(uniqueName);
+                    uf.setOriginalName(safeName);
+                    Path uploadPath = Paths.get(UPLOAD_TEMP_DIR, uniqueName);
+                    uf.setFilePath(uploadPath.toAbsolutePath().toString());
+                    uf.setFileSize(Files.exists(uploadPath) ? Files.size(uploadPath) : 0L);
+                    uf.setSource("ocr_batch");
+                    uf.setIngestStatus(matchedResult != null && matchedResult.isSuccess() ? "ingested" : "failed");
+                    uf.setSegmentCount(0); // OCR批量入库的片段数难以精确统计，设为0
+                    uf.setCreateTime(LocalDateTime.now());
+                    uploadedFileRepository.save(uf);
+                    System.out.println("[OCR批量上传] ✅ 数据库记录已保存: " + uniqueName);
+                } catch (Exception dbEx) {
+                    System.err.println("[OCR批量上传] ⚠️ 数据库记录保存失败: " + uniqueName + " - " + dbEx.getMessage());
+                }
+            }
+
             return Result.success(results);
 
         } catch (IOException e) {
@@ -929,18 +1144,49 @@ public class DevAiController {
                 return;
             }
 
-            // 多路径查找文件
+            // 【改进】三级文件查找策略：DB精确匹配 → DB模糊匹配 → 目录回退
             Path filePath = null;
-            String[] searchDirs = {
-                "./uploads/temp",
-                "./templates",
-                "./src/main/resources/templates"
-            };
-            for (String dir : searchDirs) {
-                Path candidate = Paths.get(dir, decodedName);
-                if (Files.exists(candidate)) {
-                    filePath = candidate;
-                    break;
+
+            // 1. 优先从数据库精确查找（fileName字段）
+            UploadedFile uploadedFile = uploadedFileRepository.findByFileName(decodedName);
+            if (uploadedFile != null && uploadedFile.getFilePath() != null) {
+                Path dbPath = Paths.get(uploadedFile.getFilePath());
+                if (Files.exists(dbPath)) {
+                    filePath = dbPath;
+                    System.out.println("[文件预览] ✅ DB精确匹配: " + decodedName);
+                }
+            }
+
+            // 2. 数据库模糊查找（文件名包含关系）
+            if (filePath == null) {
+                List<UploadedFile> allFiles = uploadedFileRepository.findAllByOrderByCreateTimeDesc();
+                for (UploadedFile uf : allFiles) {
+                    String fn = uf.getFileName();
+                    if (fn != null && (fn.equals(decodedName) || fn.contains(decodedName) || decodedName.contains(fn))) {
+                        Path dbPath = Paths.get(uf.getFilePath());
+                        if (Files.exists(dbPath)) {
+                            filePath = dbPath;
+                            System.out.println("[文件预览] ✅ DB模糊匹配: " + decodedName + " → " + fn);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 3. 回退到固定目录查找
+            if (filePath == null) {
+                String[] searchDirs = {
+                    "./uploads/temp",
+                    "./templates",
+                    "./src/main/resources/templates"
+                };
+                for (String dir : searchDirs) {
+                    Path candidate = Paths.get(dir, decodedName);
+                    if (Files.exists(candidate)) {
+                        filePath = candidate;
+                        System.out.println("[文件预览] ✅ 目录回退匹配: " + decodedName);
+                        break;
+                    }
                 }
             }
 
@@ -1163,6 +1409,334 @@ public class DevAiController {
     @Scheduled(cron = "0 0 2 * * ?") // 每天凌晨2点
     public void scheduledCleanup() {
         memoryService.cleanupLowValueMemories();
+    }
+
+    // ==================== Agent 工作流管理 ====================
+
+    /**
+     * 保存工作流定义
+     */
+    @PostMapping("/workflow/save")
+    public Result<Map<String, Object>> saveWorkflow(@RequestBody Map<String, Object> request) {
+        try {
+            String workflowId = (String) request.get("workflowId");
+            String name = (String) request.get("name");
+            String description = (String) request.get("description");
+            String nodesJson = (String) request.get("nodesJson");
+            String edgesJson = (String) request.get("edgesJson");
+            String configJson = (String) request.get("configJson");
+            Boolean enabled = (Boolean) request.getOrDefault("enabled", true);
+
+            if (workflowId == null || workflowId.isBlank()) {
+                return Result.error("工作流ID不能为空");
+            }
+            if (name == null || name.isBlank()) {
+                return Result.error("工作流名称不能为空");
+            }
+
+            com.devai.devaiplatform.entity.WorkflowDefinition workflow;
+            Optional<com.devai.devaiplatform.entity.WorkflowDefinition> existing = workflowRepository.findByWorkflowId(workflowId);
+            
+            if (existing.isPresent()) {
+                // 更新现有工作流
+                workflow = existing.get();
+                workflow.setName(name);
+                workflow.setDescription(description);
+                workflow.setNodesJson(nodesJson);
+                workflow.setEdgesJson(edgesJson);
+                workflow.setConfigJson(configJson);
+                workflow.setEnabled(enabled);
+            } else {
+                // 创建新工作流
+                workflow = new com.devai.devaiplatform.entity.WorkflowDefinition();
+                workflow.setWorkflowId(workflowId);
+                workflow.setName(name);
+                workflow.setDescription(description);
+                workflow.setNodesJson(nodesJson);
+                workflow.setEdgesJson(edgesJson);
+                workflow.setConfigJson(configJson);
+                workflow.setEnabled(enabled);
+            }
+
+            workflowRepository.save(workflow);
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("workflowId", workflow.getWorkflowId());
+            response.put("message", "工作流保存成功");
+            response.put("id", workflow.getId());
+
+            return Result.success(response);
+        } catch (Exception e) {
+            System.err.println("[工作流] 保存失败: " + e.getMessage());
+            e.printStackTrace();
+            return Result.error("保存失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取所有启用的工作流列表
+     */
+    @GetMapping("/workflow/list")
+    public Result<List<Map<String, Object>>> listWorkflows() {
+        try {
+            var workflows = workflowRepository.findByEnabledTrue();
+            List<Map<String, Object>> result = workflows.stream().map(wf -> {
+                Map<String, Object> map = new LinkedHashMap<>();
+                map.put("workflowId", wf.getWorkflowId());
+                map.put("name", wf.getName());
+                map.put("description", wf.getDescription());
+                map.put("enabled", wf.getEnabled());
+                map.put("createdAt", wf.getCreatedAt());
+                map.put("updatedAt", wf.getUpdatedAt());
+                return map;
+            }).toList();
+            return Result.success(result);
+        } catch (Exception e) {
+            System.err.println("[工作流] 获取列表失败: " + e.getMessage());
+            return Result.error("获取失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取单个工作流详情（包含节点和连线）
+     */
+    @GetMapping("/workflow/detail/{workflowId}")
+    public Result<Map<String, Object>> getWorkflowDetail(@PathVariable String workflowId) {
+        try {
+            var workflow = workflowRepository.findByWorkflowId(workflowId)
+                .orElseThrow(() -> new RuntimeException("工作流不存在: " + workflowId));
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("workflowId", workflow.getWorkflowId());
+            result.put("name", workflow.getName());
+            result.put("description", workflow.getDescription());
+            result.put("nodesJson", workflow.getNodesJson());
+            result.put("edgesJson", workflow.getEdgesJson());
+            result.put("configJson", workflow.getConfigJson());
+            result.put("enabled", workflow.getEnabled());
+            result.put("createdAt", workflow.getCreatedAt());
+            result.put("updatedAt", workflow.getUpdatedAt());
+
+            return Result.success(result);
+        } catch (Exception e) {
+            System.err.println("[工作流] 获取详情失败: " + e.getMessage());
+            return Result.error("获取失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 删除工作流
+     */
+    @DeleteMapping("/workflow/delete/{workflowId}")
+    public Result<String> deleteWorkflow(@PathVariable String workflowId) {
+        try {
+            var workflow = workflowRepository.findByWorkflowId(workflowId)
+                .orElseThrow(() -> new RuntimeException("工作流不存在: " + workflowId));
+            workflowRepository.delete(workflow);
+            return Result.success("工作流已删除");
+        } catch (Exception e) {
+            System.err.println("[工作流] 删除失败: " + e.getMessage());
+            return Result.error("删除失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 执行工作流
+     */
+    @PostMapping("/workflow/execute/{workflowId}")
+    public Result<Map<String, Object>> executeWorkflow(
+            @PathVariable String workflowId,
+            @RequestParam String taskContent) {
+        try {
+            var workflow = workflowRepository.findByWorkflowId(workflowId)
+                .orElseThrow(() -> new RuntimeException("工作流不存在: " + workflowId));
+
+            if (!workflow.getEnabled()) {
+                return Result.error("工作流已禁用，请先启用");
+            }
+
+            System.out.println("[工作流执行] 开始执行: " + workflow.getName() + " | 任务: " + taskContent);
+            
+            long startTime = System.currentTimeMillis();
+            String result = workflowEngine.execute(workflow, taskContent);
+            long duration = System.currentTimeMillis() - startTime;
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("result", result);
+            response.put("workflowName", workflow.getName());
+            response.put("duration", duration + "ms");
+
+            System.out.println("[工作流执行] 完成，耗时: " + duration + "ms");
+            return Result.success(response);
+        } catch (Exception e) {
+            System.err.println("[工作流] 执行失败: " + e.getMessage());
+            e.printStackTrace();
+            return Result.error("执行失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * SSE 流式执行工作流（实时推送进度）
+     */
+    @PostMapping(value = "/workflow/execute-stream/{workflowId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter executeWorkflowStream(
+            @PathVariable String workflowId,
+            @RequestParam String taskContent) {
+        
+        SseEmitter emitter = new SseEmitter(300_000L); // 5分钟超时
+        AtomicBoolean emitterDone = new AtomicBoolean(false);
+
+        java.util.function.BiConsumer<String, String> safeSend = (type, data) -> {
+            if (!emitterDone.get()) {
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name(type)
+                            .data(data));
+                } catch (IOException e) {
+                    System.err.println("[SSE] 发送失败: " + e.getMessage());
+                    emitterDone.set(true);
+                }
+            }
+        };
+
+        // 设置进度回调
+        DevAgentService.setProgressCallback((type, message) -> safeSend.accept(type, message));
+
+        new Thread(() -> {
+            try {
+                var workflow = workflowRepository.findByWorkflowId(workflowId)
+                    .orElseThrow(() -> new RuntimeException("工作流不存在: " + workflowId));
+
+                if (!workflow.getEnabled()) {
+                    safeSend.accept("error", "工作流已禁用");
+                    emitter.complete();
+                    return;
+                }
+
+                System.out.println("[工作流SSE] 开始执行: " + workflow.getName());
+                safeSend.accept("start", "工作流启动: " + workflow.getName());
+
+                String result = workflowEngine.execute(workflow, taskContent);
+                safeSend.accept("result", result);
+                safeSend.accept("done", "工作流执行完成");
+                emitter.complete();
+
+            } catch (Exception e) {
+                System.err.println("[工作流SSE] 执行失败: " + e.getMessage());
+                e.printStackTrace();
+                safeSend.accept("error", "执行失败: " + e.getMessage());
+                if (!emitterDone.get()) {
+                    emitter.completeWithError(e);
+                }
+            } finally {
+                DevAgentService.clearProgressCallback();
+            }
+        }).start();
+
+        return emitter;
+    }
+
+    // ==================== RAG 反馈与优化 ====================
+
+    /**
+     * 提交RAG检索结果反馈（评分 + 问题描述）
+     */
+    @PostMapping("/rag/feedback")
+    public Result<Map<String, Object>> submitRagFeedback(@RequestBody Map<String, Object> feedback) {
+        try {
+            RagFeedback rf = new RagFeedback();
+            rf.setQueryText((String) feedback.get("queryText"));
+            rf.setScore((Integer) feedback.get("score"));
+            rf.setIssueType((String) feedback.get("issueType"));
+            rf.setIssueDetail((String) feedback.get("issueDetail"));
+            rf.setSourceFiles((String) feedback.get("sourceFiles"));
+            rf.setSegmentCount(feedback.get("segmentCount") != null ? (Integer) feedback.get("segmentCount") : 0);
+            rf.setOptimizationApplied(false);
+            rf.setCreateTime(LocalDateTime.now());
+
+            // AI自动生成优化建议
+            String suggestion = generateOptimizationSuggestion(rf);
+            rf.setAiSuggestion(suggestion);
+
+            ragFeedbackRepository.save(rf);
+
+            // 【核心】反馈提交后触发自动调参
+            Map<String, Object> tuningResult = ragTuningService.autoTuneAfterFeedback();
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("id", rf.getId());
+            result.put("aiSuggestion", suggestion);
+            result.put("tuning", tuningResult);
+            result.put("message", "✅ 反馈已提交，AI已生成优化建议" + (Boolean.TRUE.equals(tuningResult.get("tuned")) ? "并自动调整了检索参数" : ""));
+            return Result.success(result);
+        } catch (Exception e) {
+            return Result.error("反馈提交失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取RAG反馈历史列表
+     */
+    @GetMapping("/rag/feedback/list")
+    public Result<List<RagFeedback>> listRagFeedback() {
+        return Result.success(ragFeedbackRepository.findAllByOrderByCreateTimeDesc());
+    }
+
+    /**
+     * 获取RAG检索详情（带分数、来源、召回统计）
+     */
+    @PostMapping("/rag/retrieve-detail")
+    public Result<Map<String, Object>> retrieveDetail(@RequestParam String query) {
+        Map<String, Object> detail = ragService.retrieveWithDetail(query);
+        // 附加当前调参状态
+        detail.put("tuningStatus", ragTuningService.getTuningStatus());
+        return Result.success(detail);
+    }
+
+    /**
+     * 获取RAG自动调参状态
+     */
+    @GetMapping("/rag/tuning-status")
+    public Result<Map<String, Object>> getTuningStatus() {
+        return Result.success(ragTuningService.getTuningStatus());
+    }
+
+    /**
+     * AI根据用户反馈生成优化建议
+     */
+    private String generateOptimizationSuggestion(RagFeedback feedback) {
+        StringBuilder sb = new StringBuilder();
+        int score = feedback.getScore();
+        String issueType = feedback.getIssueType();
+
+        if (score >= 4) {
+            sb.append("✅ 用户对检索结果满意，当前策略有效。");
+        } else if (score == 3) {
+            sb.append("⚠️ 结果基本相关但不够精确。建议：");
+            if ("incomplete".equals(issueType)) {
+                sb.append("增加topK参数以召回更多片段；检查文档是否完整入库。");
+            } else if ("inaccurate".equals(issueType)) {
+                sb.append("提高minScore阈值过滤低相关性结果；考虑调整BM25/KNN权重。");
+            } else {
+                sb.append("尝试细化查询关键词或使用文件名精确匹配。");
+            }
+        } else {
+            sb.append("❌ 检索效果较差。建议：");
+            if ("irrelevant".equals(issueType)) {
+                sb.append("1. 检查向量库中是否存在相关文件\n");
+                sb.append("2. 确认文档已正确分片和向量化\n");
+                sb.append("3. 尝试使用文件名精确匹配模式");
+            } else if ("incomplete".equals(issueType)) {
+                sb.append("1. 增大topK到15-20\n");
+                sb.append("2. 降低minScore到0.05\n");
+                sb.append("3. 检查源文件是否被截断");
+            } else {
+                sb.append("1. 重新上传并解析相关文档\n");
+                sb.append("2. 调整分片策略（减小chunk size提高精度）\n");
+                sb.append("3. 启用混合检索(BM25+KNN)模式");
+            }
+        }
+        return sb.toString();
     }
 
 }

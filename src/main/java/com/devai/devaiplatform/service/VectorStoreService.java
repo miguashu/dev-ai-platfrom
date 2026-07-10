@@ -62,6 +62,16 @@ public class VectorStoreService {
      */
     @PostConstruct
     public void loadFromDisk() {
+        // 【诊断】打印 ES 模式检测结果
+        System.out.println("[向量服务] 启动诊断: storeType='" + storeType
+                + "', esVectorStoreService=" + (esVectorStoreService != null ? "已注入" : "null(未注入)")
+                + ", isElasticsearchMode=" + isElasticsearchMode());
+        if ("elasticsearch".equalsIgnoreCase(storeType) && esVectorStoreService == null) {
+            System.err.println("[向量服务] ⚠️ 配置了 vector.store.type=elasticsearch 但 ES 服务未注入！");
+            System.err.println("[向量服务] 可能原因: ElasticsearchVectorStoreService 的 @ConditionalOnProperty 未匹配，或 ES 连接失败");
+            System.err.println("[向量服务] 请检查: 1) ES是否运行在配置地址  2) vector.store.type 配置是否正确  3) 启动日志中是否有ES相关错误");
+        }
+
         Path path = Paths.get(persistPath);
         if (!Files.exists(path)) {
             System.out.println("[向量持久化] 未找到持久化文件，从空库启动: " + persistPath);
@@ -243,8 +253,20 @@ public class VectorStoreService {
      * 是否为Elasticsearch模式
      */
     public boolean isElasticsearchMode() {
-        return "elasticsearch".equalsIgnoreCase(storeType) && esVectorStoreService != null;
+        boolean typeMatch = "elasticsearch".equalsIgnoreCase(storeType);
+        boolean serviceReady = esVectorStoreService != null;
+        if (!typeMatch) {
+            // 只在首次打印，避免刷屏
+            if (!esModeDiagPrinted) {
+                System.err.println("[向量服务] ⚠️ storeType='" + storeType + "' 不匹配 'elasticsearch'，降级为内存模式");
+                System.err.println("[向量服务] 请检查 application.properties 中 vector.store.type=elasticsearch 是否正确配置");
+                esModeDiagPrinted = true;
+            }
+        }
+        return typeMatch && serviceReady;
     }
+
+    private volatile boolean esModeDiagPrinted = false;
 
     /**
      * 清空向量库
@@ -291,6 +313,47 @@ public class VectorStoreService {
             esVectorStoreService.addCount(count);
         } else {
             memorySegmentCount.addAndGet(count);
+        }
+    }
+
+    /**
+     * 按文件名删除向量库中该文件的所有片段
+     */
+    public int deleteByFileName(String fileName) {
+        if (isElasticsearchMode()) {
+            return esVectorStoreService.deleteByFileName(fileName);
+        } else {
+            // 内存模式：不支持按文件名删除（InMemoryEmbeddingStore无此能力）
+            System.err.println("[向量服务] 内存模式不支持按文件名删除，请切换到ES模式");
+            return 0;
+        }
+    }
+
+    /**
+     * 获取向量库中所有不重复的文件名列表及其片段数
+     */
+    public List<Map<String, Object>> listFilesWithCounts() {
+        if (isElasticsearchMode()) {
+            return esVectorStoreService.listFilesWithCounts();
+        } else {
+            // 内存模式：从持久化文件中提取
+            List<Map<String, Object>> result = new ArrayList<>();
+            Map<String, Integer> fileCounts = new java.util.LinkedHashMap<>();
+            for (Map<String, Object> entry : persistBuffer) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> meta = (Map<String, Object>) entry.get("metadata");
+                if (meta != null && meta.containsKey("file_name")) {
+                    String fn = (String) meta.get("file_name");
+                    fileCounts.merge(fn, 1, Integer::sum);
+                }
+            }
+            for (Map.Entry<String, Integer> e : fileCounts.entrySet()) {
+                Map<String, Object> item = new java.util.LinkedHashMap<>();
+                item.put("fileName", e.getKey());
+                item.put("segmentCount", e.getValue());
+                result.add(item);
+            }
+            return result;
         }
     }
 

@@ -248,6 +248,132 @@
             color: #8844cc;
         }
 
+        /* ===== RAG 召回可视化面板 ===== */
+        .rag-feedback-panel {
+            margin-top: 12px;
+            border: 1px solid #e8e8e8;
+            border-radius: 10px;
+            background: #fafbfc;
+            overflow: hidden;
+            font-size: 13px;
+        }
+        .rag-feedback-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 14px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #eef1f5 100%);
+            cursor: pointer;
+            user-select: none;
+        }
+        .rag-feedback-header:hover { background: #e8ecf1; }
+        .rag-stats-bar {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            font-size: 12px;
+            color: #555;
+        }
+        .rag-stat-item { display: flex; align-items: center; gap: 4px; }
+        .rag-stat-value { font-weight: bold; color: #667eea; }
+        .rag-detail-body { padding: 10px 14px; display: none; }
+        .rag-detail-body.open { display: block; }
+        .rag-segment-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px dashed #eee;
+        }
+        .rag-segment-row:last-child { border-bottom: none; }
+        .rag-score-bar {
+            width: 80px;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .rag-score-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+        .rag-segment-text {
+            flex: 1;
+            color: #666;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        /* 打分星级 */
+        .rag-star-rating { display: inline-flex; gap: 2px; margin-left: 8px; }
+        .rag-star {
+            cursor: pointer;
+            font-size: 18px;
+            color: #ddd;
+            transition: color 0.15s;
+        }
+        .rag-star.active, .rag-star:hover { color: #f5a623; }
+        /* 反馈表单 */
+        .rag-feedback-form {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 8px;
+            border: 1px solid #eee;
+            display: none;
+        }
+        .rag-feedback-form.open { display: block; }
+        .rag-issue-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+        .rag-issue-btn {
+            padding: 4px 10px;
+            border: 1px solid #ddd;
+            border-radius: 14px;
+            background: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .rag-issue-btn.selected {
+            background: #667eea;
+            color: #fff;
+            border-color: #667eea;
+        }
+        .rag-feedback-textarea {
+            width: 100%;
+            min-height: 50px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 8px;
+            font-size: 12px;
+            resize: vertical;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+        .rag-submit-btn {
+            margin-top: 6px;
+            padding: 5px 16px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff;
+            border: none;
+            border-radius: 14px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .rag-submit-btn:hover { opacity: 0.9; }
+        .rag-suggestion-box {
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: #e8f5e9;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #2e7d32;
+            line-height: 1.5;
+            display: none;
+        }
+
         .message-time {
             font-size: 12px;
             color: #999;
@@ -574,6 +700,68 @@
             font-size: 12px;
             padding: 15px 0;
         }
+
+        /* ========== 向量库文件管理弹窗 ========== */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-dialog {
+            background: white;
+            border-radius: 12px;
+            width: 680px;
+            max-width: 90vw;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+        }
+        .modal-header h3 { margin: 0; font-size: 16px; }
+        .modal-close {
+            background: none; border: none; font-size: 24px;
+            cursor: pointer; color: #999; line-height: 1;
+        }
+        .modal-close:hover { color: #e74c3c; }
+        .modal-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+        .vm-toolbar {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 12px; font-size: 13px; color: #666;
+        }
+        .vm-btn {
+            padding: 6px 14px; border: none; border-radius: 6px;
+            cursor: pointer; font-size: 12px; transition: all 0.2s;
+        }
+        .vm-btn-refresh { background: #eef0ff; color: #667eea; }
+        .vm-btn-refresh:hover { background: #dde0ff; }
+        .vm-btn-delete-all { background: #ffeaea; color: #e74c3c; }
+        .vm-btn-delete-all:hover:not(:disabled) { background: #ffd0d0; }
+        .vm-btn-delete-all:disabled { opacity: 0.5; cursor: not-allowed; }
+        .vm-table-wrap { max-height: 400px; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; }
+        .vm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .vm-table th {
+            background: #f8f9fa; padding: 10px 12px; text-align: left;
+            font-weight: 600; color: #555; position: sticky; top: 0; z-index: 1;
+        }
+        .vm-table td { padding: 8px 12px; border-top: 1px solid #f0f0f0; }
+        .vm-table tr:hover td { background: #fafbff; }
+        .vm-table input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+        .vm-del-btn {
+            background: none; border: 1px solid #e74c3c; color: #e74c3c;
+            padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;
+        }
+        .vm-del-btn:hover { background: #e74c3c; color: white; }
     </style>
 </head>
 <body>
@@ -646,6 +834,12 @@
                 </div>
             </div>
 
+            <!-- 知识库管理 -->
+            <div class="upload-section">
+                <h3>📚 知识库管理</h3>
+                <button class="upload-btn" onclick="openVectorFileManager()" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); margin-top: 10px;">🗂️ 查看/管理向量库文件</button>
+            </div>
+
             <!-- 历史会话 -->
             <div class="history-panel">
                 <h3>
@@ -656,6 +850,19 @@
                 <div class="history-list" id="historyList">
                     <div class="history-empty">暂无历史会话</div>
                 </div>
+            </div>
+
+            <!-- 上下文压缩 -->
+            <div class="upload-section">
+                <h3>🗜️ 上下文管理</h3>
+                <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                    当对话过长时，智能压缩提取关键信息
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+                    <button class="upload-btn" onclick="checkCompressionStatus()" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">🔍 检查压缩状态</button>
+                    <button class="upload-btn" onclick="manualCompressContext()" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">⚡ 手动压缩上下文</button>
+                </div>
+                <div id="compressionStatus" class="log-area" style="display: none; margin-top: 10px;"></div>
             </div>
 
             <!-- 状态面板 -->
@@ -672,6 +879,38 @@
                 <div class="status-item">
                     <span class="status-label">对话轮数:</span>
                     <span class="status-value" id="chatCount">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 向量库文件管理弹窗 -->
+        <div id="vectorFileManagerModal" class="modal-overlay" style="display:none;">
+            <div class="modal-dialog">
+                <div class="modal-header">
+                    <h3>📚 向量库文件管理</h3>
+                    <button class="modal-close" onclick="closeVectorFileManager()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="vm-toolbar">
+                        <span id="vmFileCount">加载中...</span>
+                        <button class="vm-btn vm-btn-refresh" onclick="loadVectorFiles()">🔄 刷新</button>
+                        <button class="vm-btn vm-btn-delete-all" id="vmDeleteSelectedBtn" onclick="deleteSelectedVectorFiles()" disabled>🗑️ 删除选中 (0)</button>
+                    </div>
+                    <div class="vm-table-wrap">
+                        <table class="vm-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:40px;"><input type="checkbox" id="vmSelectAll" onchange="toggleSelectAll(this)"></th>
+                                    <th>文件名</th>
+                                    <th style="width:80px;">片段数</th>
+                                    <th style="width:60px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vmFileList">
+                                <tr><td colspan="4" style="text-align:center;color:#999;">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -898,10 +1137,12 @@
                     const messageDiv = document.createElement('div');
                     messageDiv.className = `message ${msg.role}`;
                     const avatar = msg.role === 'ai' ? '🤖' : '👤';
+                    // AI消息需要格式化（Markdown → HTML），用户消息保持原样
+                    const displayContent = msg.role === 'ai' ? formatResponse(msg.content) : msg.content;
                     messageDiv.innerHTML = `
                         <div class="message-avatar">${avatar}</div>
                         <div>
-                            <div class="message-content">${msg.content}</div>
+                            <div class="message-content">${displayContent}</div>
                             <div class="message-time">${msg.time || ''}</div>
                         </div>
                     `;
@@ -1004,6 +1245,120 @@
             });
             document.getElementById('welcomeTime').textContent = timeStr;
         }
+
+        // ==================== 向量库文件管理 ====================
+
+        let vmSelectedFiles = new Set();
+
+        function openVectorFileManager() {
+            document.getElementById('vectorFileManagerModal').style.display = 'flex';
+            loadVectorFiles();
+        }
+
+        function closeVectorFileManager() {
+            document.getElementById('vectorFileManagerModal').style.display = 'none';
+        }
+
+        async function loadVectorFiles() {
+            const tbody = document.getElementById('vmFileList');
+            const countSpan = document.getElementById('vmFileCount');
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px;">⏳ 加载中...</td></tr>';
+            vmSelectedFiles.clear();
+            updateDeleteBtn();
+            document.getElementById('vmSelectAll').checked = false;
+
+            try {
+                const resp = await fetch(`${API_BASE}/lib/files`);
+                const json = await resp.json();
+                if (json.code !== 200) {
+                    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#e74c3c;">❌ ${json.message}</td></tr>`;
+                    return;
+                }
+                const files = json.data || [];
+                if (files.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px;">📭 向量库为空，请先上传文档</td></tr>';
+                    countSpan.textContent = '共 0 个文件';
+                    return;
+                }
+
+                countSpan.textContent = `共 ${files.length} 个文件`;
+                tbody.innerHTML = '';
+                files.forEach(f => {
+                    const tr = document.createElement('tr');
+                    const fn = f.fileName || '';
+                    const seg = f.segmentCount || 0;
+                    tr.innerHTML = `
+                        <td><input type="checkbox" class="vm-file-cb" data-filename="${fn.replace(/"/g, '&quot;')}" onchange="onVmFileCheck(this)"></td>
+                        <td title="${fn}" style="word-break:break-all;">${fn}</td>
+                        <td>${seg}</td>
+                        <td><button class="vm-del-btn" onclick="deleteSingleVectorFile('${fn.replace(/'/g, "\\'")}')">删除</button></td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#e74c3c;">❌ 加载失败: ${err.message}</td></tr>`;
+            }
+        }
+
+        function onVmFileCheck(cb) {
+            if (cb.checked) vmSelectedFiles.add(cb.dataset.filename);
+            else vmSelectedFiles.delete(cb.dataset.filename);
+            updateDeleteBtn();
+        }
+
+        function toggleSelectAll(masterCb) {
+            const cbs = document.querySelectorAll('.vm-file-cb');
+            vmSelectedFiles.clear();
+            cbs.forEach(cb => {
+                cb.checked = masterCb.checked;
+                if (masterCb.checked) vmSelectedFiles.add(cb.dataset.filename);
+            });
+            updateDeleteBtn();
+        }
+
+        function updateDeleteBtn() {
+            const btn = document.getElementById('vmDeleteSelectedBtn');
+            const count = vmSelectedFiles.size;
+            btn.textContent = `🗑️ 删除选中 (${count})`;
+            btn.disabled = count === 0;
+        }
+
+        async function deleteSingleVectorFile(fileName) {
+            if (!confirm(`确定删除文件「${fileName}」及其所有向量片段吗？`)) return;
+            await doDeleteVectorFiles([fileName]);
+        }
+
+        async function deleteSelectedVectorFiles() {
+            if (vmSelectedFiles.size === 0) return;
+            if (!confirm(`确定删除选中的 ${vmSelectedFiles.size} 个文件及其所有向量片段吗？`)) return;
+            await doDeleteVectorFiles([...vmSelectedFiles]);
+        }
+
+        async function doDeleteVectorFiles(fileNames) {
+            try {
+                const resp = await fetch(`${API_BASE}/lib/files`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(fileNames)
+                });
+                const json = await resp.json();
+                if (json.code === 200 && json.data) {
+                    const d = json.data;
+                    alert(d.message || '删除完成');
+                    loadVectorFiles();
+                } else {
+                    alert('删除失败: ' + (json.message || '未知错误'));
+                }
+            } catch (err) {
+                alert('删除请求失败: ' + err.message);
+            }
+        }
+
+        // 点击弹窗外部关闭
+        document.addEventListener('click', function(e) {
+            const modal = document.getElementById('vectorFileManagerModal');
+            if (e.target === modal) closeVectorFileManager();
+        });
 
         // 加载状态
         async function loadStatus() {
@@ -1139,7 +1494,7 @@
         let lastToolLimitHit = false;
 
         // 带操作按钮的消息
-        function addMessageWithActions(role, content, actions) {
+        function addMessageWithActions(role, content, actions, options) {
             const chatMessages = document.getElementById('chatMessages');
             const id = 'msg-' + Date.now();
             const msgDiv = document.createElement('div');
@@ -1152,10 +1507,16 @@
                 `<button class="action-btn ${a.cls}" style="margin-right:8px;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-size:13px;${a.cls.includes('continue')?'background:#667eea;color:white;':'background:#e0e0e0;color:#333;'}" data-action="${i}">${a.text}</button>`
             ).join('');
 
+            // RAG面板
+            let ragHtml = '';
+            if (role === 'ai' && options && options.ragQuery) {
+                ragHtml = buildRagFeedbackPanel(options.ragQuery);
+            }
+
             msgDiv.innerHTML = `
                 <div class="message-avatar">${avatar}</div>
                 <div style="flex:1;">
-                    <div class="message-content">${content}</div>
+                    <div class="message-content">${content}${ragHtml}</div>
                     <div class="action-row" style="margin-top:12px;">${btnHTML}</div>
                     <div class="message-time">${time}</div>
                 </div>
@@ -1235,7 +1596,7 @@
         }
 
         // 添加消息到聊天区
-        function addMessage(role, content) {
+        function addMessage(role, content, options) {
             const chatMessages = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role}`;
@@ -1245,11 +1606,17 @@
                 hour: '2-digit',
                 minute: '2-digit'
             });
+
+            // 如果AI消息且开启了RAG，追加召回可视化面板
+            let extraHtml = '';
+            if (role === 'ai' && options && options.ragQuery) {
+                extraHtml = buildRagFeedbackPanel(options.ragQuery);
+            }
             
             messageDiv.innerHTML = `
                 <div class="message-avatar">${avatar}</div>
                 <div>
-                    <div class="message-content">${content}</div>
+                    <div class="message-content">${content}${extraHtml}</div>
                     <div class="message-time">${time}</div>
                 </div>
             `;
@@ -1363,11 +1730,12 @@
 
                     lastToolLimitHit = hitLimit;
                     if (result) {
+                        const agentRagOpt = ragEnabled ? { ragQuery: question } : undefined;
                         addMessageWithActions('ai', 
                             (hitLimit ? '<div style="background:#fff3cd;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;">⚠️ 本轮已用尽50次工具额度，结果可能不完整</div>' : '') + formatResponse(result), [
                             { text: '✅ 已完成', cls: '', action: () => {} },
                             { text: hitLimit ? '🔄 继续执行（新一轮配额）' : '🔄 继续优化', cls: 'continue-btn', action: () => continueAgent(question, context + '\nAI：' + result, hitLimit) }
-                        ]);
+                        ], agentRagOpt);
                     } else {
                         addMessage('ai', '❌ 请求失败：未收到结果');
                     }
@@ -1387,7 +1755,8 @@
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     const json = await resp.json();
                     result = json.code === 200 ? json.data : null;
-                    addMessage('ai', result ? formatResponse(result) : `❌ ${json.message || '请求失败'}`);
+                    const ragOpt = ragEnabled ? { ragQuery: question } : undefined;
+                    addMessage('ai', result ? formatResponse(result) : `❌ ${json.message || '请求失败'}`, ragOpt);
                     return;
                 }
 
@@ -1480,6 +1849,168 @@
                       .replace(/</g, '&lt;')
                       .replace(/>/g, '&gt;')
                       .replace(/"/g, '&quot;');
+        }
+
+        // ==================== RAG 召回可视化 & 反馈系统 ====================
+
+        /**
+         * 构建RAG召回可视化+反馈面板HTML
+         * @param queryText 用户查询文本
+         */
+        function buildRagFeedbackPanel(queryText) {
+            const panelId = 'rag-panel-' + Date.now();
+            return `
+            <div class="rag-feedback-panel" id="${panelId}" data-query="${escapeHtml(queryText)}">
+                <div class="rag-feedback-header" onclick="toggleRagDetail('${panelId}')">
+                    <span>📊 RAG 召回详情 <span style="font-size:11px;color:#999;">(点击展开)</span></span>
+                    <div class="rag-stats-bar" id="${panelId}-stats">
+                        <span class="rag-stat-item">⏳ 加载中...</span>
+                    </div>
+                </div>
+                <div class="rag-detail-body" id="${panelId}-body"></div>
+                <!-- 【新增】当前调参状态展示 -->
+                <div class="rag-tuning-status" id="${panelId}-tuning" style="padding:6px 14px;font-size:11px;color:#888;border-top:1px dashed #eee;display:none;">
+                    🔧 <strong>AI自动调参：</strong><span id="${panelId}-tuning-text">加载中...</span>
+                </div>
+                <div style="padding:8px 14px;display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:12px;color:#666;">满意度：</span>
+                    <div class="rag-star-rating" id="${panelId}-stars">
+                        ${[1,2,3,4,5].map(n => `<span class="rag-star" data-score="${n}" onclick="rateRagResult('${panelId}',${n})">★</span>`).join('')}
+                    </div>
+                    <button style="margin-left:auto;padding:3px 10px;border:1px solid #ddd;border-radius:12px;background:#fff;font-size:11px;cursor:pointer;" onclick="openRagFeedbackForm('${panelId}')">✏️ 指出问题</button>
+                </div>
+                <div class="rag-feedback-form" id="${panelId}-form">
+                    <div style="font-size:12px;color:#666;margin-bottom:6px;">问题类型：</div>
+                    <div class="rag-issue-btns" id="${panelId}-issues">
+                        <span class="rag-issue-btn" data-type="irrelevant" onclick="selectIssueType('${panelId}','irrelevant')">❌ 不相关</span>
+                        <span class="rag-issue-btn" data-type="incomplete" onclick="selectIssueType('${panelId}','incomplete')">📭 不完整</span>
+                        <span class="rag-issue-btn" data-type="inaccurate" onclick="selectIssueType('${panelId}','inaccurate')">⚠️ 不准确</span>
+                        <span class="rag-issue-btn" data-type="other" onclick="selectIssueType('${panelId}','other')">💬 其他</span>
+                    </div>
+                    <textarea class="rag-feedback-textarea" id="${panelId}-detail" placeholder="请描述具体问题，AI将根据您的反馈优化检索策略..."></textarea>
+                    <button class="rag-submit-btn" onclick="submitRagFeedback('${panelId}')">提交反馈</button>
+                </div>
+                <div class="rag-suggestion-box" id="${panelId}-suggestion"></div>
+            </div>`;
+        }
+
+        // 切换RAG详情展开/折叠
+        function toggleRagDetail(panelId) {
+            const body = document.getElementById(panelId + '-body');
+            body.classList.toggle('open');
+            // 首次展开时加载数据
+            if (body.classList.contains('open') && !body.dataset.loaded) {
+                loadRagDetail(panelId);
+            }
+        }
+
+        // 加载RAG检索详情
+        async function loadRagDetail(panelId) {
+            const panel = document.getElementById(panelId);
+            const query = panel.dataset.query;
+            const statsEl = document.getElementById(panelId + '-stats');
+            const bodyEl = document.getElementById(panelId + '-body');
+
+            try {
+                const resp = await fetch(`${API_BASE}/rag/retrieve-detail?query=${encodeURIComponent(query)}`, { method: 'POST' });
+                const json = await resp.json();
+                if (json.code !== 200 || !json.data) {
+                    statsEl.innerHTML = '<span class="rag-stat-item" style="color:#e74c3c;">❌ 加载失败</span>';
+                    return;
+                }
+                const data = json.data;
+                const stats = data.stats || {};
+                const segments = data.segments || [];
+
+                // 更新统计栏
+                const avgRel = (stats.avgRelevance || 0).toFixed(2);
+                const relPercent = Math.round(avgRel * 100);
+                let relColor = relPercent >= 70 ? '#28a745' : relPercent >= 40 ? '#f5a623' : '#e74c3c';
+                statsEl.innerHTML = `
+                    <span class="rag-stat-item">📄 <span class="rag-stat-value">${stats.totalSegments || 0}</span> 片段</span>
+                    <span class="rag-stat-item">📁 <span class="rag-stat-value">${stats.uniqueFiles || 0}</span> 文件</span>
+                    <span class="rag-stat-item">⏱️ <span class="rag-stat-value">${stats.elapsedMs || 0}ms</span></span>
+                    <span class="rag-stat-item">🎯 召回率 <span class="rag-stat-value" style="color:${relColor}">${relPercent}%</span></span>
+                `;
+
+                // 渲染片段列表
+                let segHtml = '';
+                segments.forEach(seg => {
+                    const pct = Math.round(seg.relevanceScore * 100);
+                    const barColor = pct >= 70 ? '#28a745' : pct >= 40 ? '#f5a623' : '#e74c3c';
+                    segHtml += `
+                    <div class="rag-segment-row">
+                        <span style="width:20px;text-align:center;font-weight:bold;color:#999;font-size:11px;">#${seg.index}</span>
+                        <div class="rag-score-bar"><div class="rag-score-fill" style="width:${pct}%;background:${barColor};"></div></div>
+                        <span style="font-size:11px;color:${barColor};width:32px;text-align:right;">${pct}%</span>
+                        <span class="rag-segment-text" title="${escapeHtml(seg.textPreview)}">[${seg.fileName}] ${escapeHtml(seg.textPreview)}</span>
+                    </div>`;
+                });
+                bodyEl.innerHTML = segHtml || '<div style="color:#999;padding:10px;">无检索结果</div>';
+                bodyEl.dataset.loaded = 'true';
+            } catch (err) {
+                statsEl.innerHTML = '<span class="rag-stat-item" style="color:#e74c3c;">❌ ' + err.message + '</span>';
+            }
+        }
+
+        // 星级评分
+        let ragScores = {};
+        function rateRagResult(panelId, score) {
+            ragScores[panelId] = score;
+            const stars = document.getElementById(panelId + '-stars').children;
+            for (let i = 0; i < stars.length; i++) {
+                stars[i].classList.toggle('active', i < score);
+            }
+        }
+
+        // 打开反馈表单
+        function openRagFeedbackForm(panelId) {
+            document.getElementById(panelId + '-form').classList.toggle('open');
+        }
+
+        // 选择问题类型
+        let ragIssueTypes = {};
+        function selectIssueType(panelId, type) {
+            ragIssueTypes[panelId] = type;
+            const btns = document.getElementById(panelId + '-issues').children;
+            for (const btn of btns) {
+                btn.classList.toggle('selected', btn.dataset.type === type);
+            }
+        }
+
+        // 提交反馈
+        async function submitRagFeedback(panelId) {
+            const panel = document.getElementById(panelId);
+            const query = panel.dataset.query;
+            const score = ragScores[panelId] || 3;
+            const issueType = ragIssueTypes[panelId] || 'other';
+            const detail = document.getElementById(panelId + '-detail').value.trim();
+
+            try {
+                const resp = await fetch(`${API_BASE}/rag/feedback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        queryText: query,
+                        score: score,
+                        issueType: issueType,
+                        issueDetail: detail,
+                        sourceFiles: '',
+                        segmentCount: 0
+                    })
+                });
+                const json = await resp.json();
+                if (json.code === 200 && json.data) {
+                    const suggestionBox = document.getElementById(panelId + '-suggestion');
+                    suggestionBox.style.display = 'block';
+                    suggestionBox.innerHTML = '🤖 <strong>AI优化建议：</strong><br>' + (json.data.aiSuggestion || '').replace(/\n/g, '<br>');
+                    document.getElementById(panelId + '-form').classList.remove('open');
+                } else {
+                    alert('提交失败: ' + (json.message || '未知错误'));
+                }
+            } catch (err) {
+                alert('提交失败: ' + err.message);
+            }
         }
 
         // 上传单个文件

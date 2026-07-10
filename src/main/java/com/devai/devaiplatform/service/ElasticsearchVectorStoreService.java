@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -28,6 +29,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Service
 @ConditionalOnProperty(name = "vector.store.type", havingValue = "elasticsearch")
 public class ElasticsearchVectorStoreService {
+
+    // 静态初始化块：确认类是否被加载
+    static {
+        System.out.println("[ES向量库] ✅ ElasticsearchVectorStoreService 类已加载");
+    }
 
     @Value("${elasticsearch.url:http://127.0.0.1:9200}")
     private String esUrl;
@@ -53,6 +59,13 @@ public class ElasticsearchVectorStoreService {
     private volatile EmbeddingStore<TextSegment> store;
     private volatile RestClient restClient;
     private final AtomicInteger segmentCount = new AtomicInteger(0);
+
+    // Spring 构造后打印诊断
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        System.out.println("[ES向量库] ✅ Bean 已创建 | ES地址: " + esUrl + " | 索引: " + indexName
+                + " | 用户名: " + (username != null && !username.isBlank() ? "已配置" : "未配置"));
+    }
 
     /**
      * 懒加载ES存储实例
@@ -238,5 +251,89 @@ public class ElasticsearchVectorStoreService {
 
     public int getSegmentCount() {
         return segmentCount.get();
+    }
+
+    /**
+     * 按文件名删除向量库中该文件的所有片段
+     * 通过 ES delete_by_query API 实现
+     * @param fileName 文件名（metadata.file_name）
+     * @return 删除的文档数
+     */
+    public int deleteByFileName(String fileName) {
+        try {
+            RestClient client = getRestClient();
+            String query = """
+                {
+                  "query": {
+                    "term": {
+                      "metadata.file_name.keyword": "%s"
+                    }
+                  }
+                }
+                """.formatted(fileName.replace("\"", "\\\""));
+
+            Request req = new Request("POST", "/" + indexName + "/_delete_by_query");
+            req.setJsonEntity(query);
+            Response resp = client.performRequest(req);
+            String body = EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8);
+
+            // 解析 deleted 数量
+            com.alibaba.fastjson2.JSONObject json = com.alibaba.fastjson2.JSON.parseObject(body);
+            int deleted = json.getIntValue("deleted", 0);
+            System.out.println("[ES向量库] 删除文件向量: " + fileName + " → " + deleted + " 条");
+            segmentCount.addAndGet(-deleted);
+            return deleted;
+        } catch (Exception e) {
+            System.err.println("[ES向量库] 按文件名删除失败: " + fileName + " - " + e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 获取向量库中所有不重复的文件名列表
+     * 通过 ES terms aggregation 实现
+     * @return 文件名列表及其片段数
+     */
+    public List<Map<String, Object>> listFilesWithCounts() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            RestClient client = getRestClient();
+            String query = """
+                {
+                  "size": 0,
+                  "aggs": {
+                    "files": {
+                      "terms": {
+                        "field": "metadata.file_name.keyword",
+                        "size": 500
+                      }
+                    }
+                  }
+                }
+                """;
+
+            Request req = new Request("GET", "/" + indexName + "/_search");
+            req.setJsonEntity(query);
+            Response resp = client.performRequest(req);
+            String body = EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8);
+
+            com.alibaba.fastjson2.JSONObject json = com.alibaba.fastjson2.JSON.parseObject(body);
+            com.alibaba.fastjson2.JSONArray buckets = json.getJSONObject("aggregations")
+                    .getJSONObject("files").getJSONArray("buckets");
+
+            if (buckets != null) {
+                for (int i = 0; i < buckets.size(); i++) {
+                    com.alibaba.fastjson2.JSONObject bucket = buckets.getJSONObject(i);
+                    Map<String, Object> item = new java.util.LinkedHashMap<>();
+                    item.put("fileName", bucket.getString("key"));
+                    item.put("segmentCount", bucket.getIntValue("doc_count", 0));
+                    result.add(item);
+                }
+            }
+            System.out.println("[ES向量库] 列出文件: " + result.size() + " 个");
+        } catch (Exception e) {
+            System.err.println("[ES向量库] 列出文件失败: " + e.getMessage());
+        }
+        return result;
     }
 }
